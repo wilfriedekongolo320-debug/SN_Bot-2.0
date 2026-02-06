@@ -4,8 +4,8 @@
  * CORRECCIONES APLICADAS:
  * 1. Línea 502: Versión de protocolo actualizada para usar version22.version (soluciona error 405)
  * 2. Líneas 674-682: purgeSession() actualizada para usar global.authFile dinámicamente
- * 3. Línea 701: purgeOldFiles() actualizada para usar global.authFile dinámicamente
- * 4. Líneas 768-781: Manejo robusto del error 405 con limpieza de sesión y process.exit(0)
+ * 3. Líneas 701-722: purgeOldFiles() actualizada para usar global.authFile dinámicamente y corregir uso de API fs
+ * 4. Líneas 771-788: Manejo robusto del error 405 con limpieza de sesión y process.exit(0)
  */
 process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '1';
 import './config.js';
@@ -776,7 +776,8 @@ async function connectionUpdate(update) {
         const files = fs.readdirSync(sessionPath);
         for (const file of files) {
           const filePath = path.join(sessionPath, file);
-          if (fs.statSync(filePath).isFile()) {
+          const stats = fs.statSync(filePath);
+          if (stats.isFile()) {
             fs.unlinkSync(filePath);
           }
         }
