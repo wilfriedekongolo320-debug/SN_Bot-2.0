@@ -1,3 +1,12 @@
+/**
+ * main.js - WhatsApp Bot Main File
+ * 
+ * CORRECCIONES APLICADAS:
+ * 1. Línea 502: Versión de protocolo actualizada para usar version22.version (soluciona error 405)
+ * 2. Líneas 674-682: purgeSession() actualizada para usar global.authFile dinámicamente
+ * 3. Líneas 701-722: purgeOldFiles() actualizada para usar global.authFile dinámicamente y corregir uso de API fs
+ * 4. Líneas 771-788: Manejo robusto del error 405 con limpieza de sesión y process.exit(0)
+ */
 process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '1';
 import './config.js';
 import './api.js';
@@ -490,7 +499,7 @@ async function interceptMessages(messages, lidResolver) {
 const { state, saveCreds } = await useMultiFileAuthState(global.authFile);
 const version22 = await fetchLatestBaileysVersion();
 console.log(version22)
-const version = [2, 3000, 1025190524]; 
+const version = version22.version; 
 let phoneNumber = global.botnumber || process.argv.find(arg => arg.startsWith('--phone='))?.split('=')[1];
 const methodCodeQR = process.argv.includes('--method=qr');
 const methodCode = !!phoneNumber || process.argv.includes('--method=code');
@@ -663,11 +672,13 @@ fs.watch(dirToWatchccc, (eventType, filename) => {
 });
 
 function purgeSession() {
+  const sessionDir = `./${global.authFile}`;
+  if (!fs.existsSync(sessionDir)) return;
   let prekey = [];
-  let directorio = readdirSync("./MysticSession");
+  let directorio = readdirSync(sessionDir);
   let filesFolderPreKeys = directorio.filter(file => file.startsWith('pre-key-'));
   prekey = [...prekey, ...filesFolderPreKeys];
-  filesFolderPreKeys.forEach(files => unlinkSync(`./MysticSession/${files}`));
+  filesFolderPreKeys.forEach(files => unlinkSync(`${sessionDir}/${files}`));
 }
 
 function purgeSessionSB() {
@@ -687,23 +698,26 @@ function purgeSessionSB() {
 }
 
 function purgeOldFiles() {
-  const directories = ['./MysticSession/', './jadibts/'];
+  const directories = [`./${global.authFile}/`, './jadibts/'];
   const oneHourAgo = Date.now() - (60 * 60 * 1000);
   directories.forEach(dir => {
-    readdirSync(dir, (err, files) => {
-      if (err) throw err;
+    try {
+      if (!fs.existsSync(dir)) return;
+      const files = readdirSync(dir);
       files.forEach(file => {
         const filePath = path.join(dir, file);
-        stat(filePath, (err, stats) => {
-          if (err) throw err;
+        try {
+          const stats = statSync(filePath);
           if (stats.isFile() && stats.mtimeMs < oneHourAgo && file !== 'creds.json') {
-            unlinkSync(filePath, err => {
-              if (err) throw err;
-            });
+            unlinkSync(filePath);
           }
-        });
+        } catch (err) {
+          // Ignorar errores de archivos individuales
+        }
       });
-    });
+    } catch (err) {
+      // Ignorar si el directorio no existe
+    }
   });
 }
 
@@ -755,9 +769,24 @@ async function connectionUpdate(update) {
     return true;
   }
   if (reason == 405) {
-    //await fs.unlinkSync("./MysticSession/" + "creds.json");
-    console.log(chalk.bold.redBright(`[ ⚠️ ] Conexión replazada, Por favor espere un momento me voy a reiniciar...\nSi aparecen error vuelve a iniciar con : npm start`));
-    //process.send('reset');
+    console.log(chalk.bold.redBright(`[ ⚠️ ] Conexión reemplazada (error 405). Limpiando sesión...`));
+    const sessionPath = `./${global.authFile}`;
+    try {
+      if (fs.existsSync(path.join(sessionPath, 'creds.json'))) {
+        const files = fs.readdirSync(sessionPath);
+        for (const file of files) {
+          const filePath = path.join(sessionPath, file);
+          const stats = fs.statSync(filePath);
+          if (stats.isFile()) {
+            fs.unlinkSync(filePath);
+          }
+        }
+        console.log(chalk.yellow(`[ ℹ️ ] Sesión limpiada. Reinicia con: npm start`));
+      }
+    } catch (e) {
+      console.log(chalk.yellow(`[ ℹ️ ] Elimina manualmente: rm -rf ./${global.authFile}`));
+    }
+    process.exit(0);
   }
   if (connection === 'close') {
     if (reason === DisconnectReason.badSession) {
