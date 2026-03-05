@@ -20,7 +20,6 @@
  * ║  Fecha: 2026-02-06                                               ║
  * ╚══════════════════════════════════════════════════════════════════╝
  */
-
 process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '1';
 
 /* ═══════════════════════════════════════════════════════════
@@ -538,10 +537,14 @@ async function interceptMessages(messages, lidResolver) {
 const { state, saveCreds } = await useMultiFileAuthState(global.authFile);
 const version22 = await fetchLatestBaileysVersion();
 console.log(version22)
+<<<<<<< HEAD
 
 // [FIX] Usar versión dinámica — la hardcodeada causaba error 405
 const version = version22.version;
 
+=======
+const version = version22.version; 
+>>>>>>> 1817fead82f16d24604a386972728851f8980ecb
 let phoneNumber = global.botnumber || process.argv.find(arg => arg.startsWith('--phone='))?.split('=')[1];
 const methodCodeQR = process.argv.includes('--method=qr');
 const methodCode = !!phoneNumber || process.argv.includes('--method=code');
@@ -768,21 +771,29 @@ function purgeOldFiles() {
   const directories = [`./${global.authFile}/`, './jadibts/'];
   const oneHourAgo = Date.now() - (60 * 60 * 1000);
   directories.forEach(dir => {
+<<<<<<< HEAD
     if (!fs.existsSync(dir)) return;
     readdirSync(dir, (err, files) => {
       if (err) throw err;
+=======
+    try {
+      if (!fs.existsSync(dir)) return;
+      const files = readdirSync(dir);
+>>>>>>> 1817fead82f16d24604a386972728851f8980ecb
       files.forEach(file => {
         const filePath = path.join(dir, file);
-        stat(filePath, (err, stats) => {
-          if (err) throw err;
+        try {
+          const stats = statSync(filePath);
           if (stats.isFile() && stats.mtimeMs < oneHourAgo && file !== 'creds.json') {
-            unlinkSync(filePath, err => {
-              if (err) throw err;
-            });
+            unlinkSync(filePath);
           }
-        });
+        } catch (err) {
+          // Ignorar errores de archivos individuales
+        }
       });
-    });
+    } catch (err) {
+      // Ignorar si el directorio no existe
+    }
   });
 }
 
@@ -849,6 +860,7 @@ async function connectionUpdate(update) {
       if (fs.existsSync(path.join(sessionPath, 'creds.json'))) {
         const files = fs.readdirSync(sessionPath);
         for (const file of files) {
+<<<<<<< HEAD
           fs.unlinkSync(path.join(sessionPath, file));
         }
         console.log(chalk.yellow(`[ ℹ️ ] Sesión ${global.authFile} limpiada correctamente.`));
@@ -859,6 +871,20 @@ async function connectionUpdate(update) {
     }
     console.log(chalk.bold.yellowBright(`[ ℹ️ ] Reinicia el bot con: npm start`));
     process.exit(0); // exit(0) para que index.js NO lo reinicie automáticamente
+=======
+          const filePath = path.join(sessionPath, file);
+          const stats = fs.statSync(filePath);
+          if (stats.isFile()) {
+            fs.unlinkSync(filePath);
+          }
+        }
+        console.log(chalk.yellow(`[ ℹ️ ] Sesión limpiada. Reinicia con: npm start`));
+      }
+    } catch (e) {
+      console.log(chalk.yellow(`[ ℹ️ ] Elimina manualmente: rm -rf ./${global.authFile}`));
+    }
+    process.exit(0);
+>>>>>>> 1817fead82f16d24604a386972728851f8980ecb
   }
 
   if (connection === 'close') {
