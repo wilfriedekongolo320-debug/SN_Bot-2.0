@@ -2,50 +2,36 @@ import fetch from 'node-fetch';
 import { FormData, Blob } from 'formdata-node';
 import { fileTypeFromBuffer } from 'file-type';
 
-/**
- * Upload file to Catbox
- * Supported mimetypes:
- * - `image/jpeg`
- * - `image/jpg`
- * - `image/png`
- * - `video/mp4`
- * - `video/webm`
- * - `audio/mpeg`
- * - `audio/wav`
- * @param {Buffer} buffer File Buffer
- * @return {Promise<string>}
- */
 export default async (buffer) => {
-  const { ext, mime } = await fileTypeFromBuffer(buffer);
-  const form = new FormData();
-  const blob = new Blob([buffer.toArrayBuffer()], { type: mime });
-  form.append('fileToUpload', blob, 'tmp.' + ext);
-  form.append('reqtype', 'fileupload');
-  const res = await fetch('https://catbox.moe/user/api.php', {
-    method: 'POST',
-    body: form,
-  });
-  const result = await res.text(); 
-  if (result.startsWith('https://files.catbox.moe/')) {
-    return result;
-  } else {
-    throw new Error('Failed to upload the file to Catbox');
+  try {
+    const fileInfo = await fileTypeFromBuffer(buffer);
+    const ext = fileInfo?.ext || 'jpg';
+    const mime = fileInfo?.mime || 'image/jpeg';
+
+    const form = new FormData();
+    // Aquí el cambio: Usamos el buffer directamente o lo convertimos a Uint8Array
+    const blob = new Blob([Uint8Array.from(buffer)], { type: mime });
+    
+    form.append('fileToUpload', blob, `tmp.${ext}`);
+    form.append('reqtype', 'fileupload');
+
+    const res = await fetch('https://catbox.moe/user/api.php', {
+      method: 'POST',
+      body: form,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+      }
+    });
+
+    const result = await res.text(); 
+    
+    if (result.includes('https://files.catbox.moe/')) {
+      return result.trim();
+    } else {
+      throw new Error('Catbox respondió: ' + result);
+    }
+  } catch (error) {
+    console.error('❌ Error en Catbox Upload:', error);
+    throw new Error('Error al subir imagen a Catbox: ' + error.message);
   }
 };
-/*import { fileTypeFromBuffer } from "file-type"
-
-export default async (buffer) => {
- const f = await fileTypeFromBuffer(buffer)
- const file = new File([buffer], `${Date.now()}.${f.ext}`, { type: f.mime })
- const form = new FormData()
- form.append('upfile', file)
- const origin = 'https://uploadf.com'
- const r = await fetch(origin + '/upload.php', {
-  'body': form,
-  'method': 'post'
- })
- if(!r.ok) throw Error (`${r.status} ${r.statusText}`)
- const fileId = '/' + r.url.split("/").pop()
- const result = origin + '/file' + fileId;
- return result;
-}*/

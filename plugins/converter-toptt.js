@@ -19,8 +19,8 @@ const handler = async (m, {conn, usedPrefix, command}) => {
  if (!aa) return conn.sendMessage(m.chat, { audio: { url: media }, fileName: 'error.mp3', mimetype: 'audio/mpeg', ptt: true }, { quoted: m });
 };
 
-handler.help = ['tovn'];
+handler.help = ['toptt'];
 handler.tags = ['converter'];
-handler.command = ['tovn', 'toptt'];
+handler.command = ['toptt'];
 
 export default handler;

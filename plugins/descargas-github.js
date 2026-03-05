@@ -37,6 +37,6 @@ let handler = async (m, { args, usedPrefix, command, conn }) => {
 
 handler.help = ['gitclone <url>'];
 handler.tags = ['downloader'];
-handler.command = /^(gitclone|clonarepo|clonarrepo|repoclonar)$/i;
+handler.command = /^(gitclone)$/i;
 
 export default handler;

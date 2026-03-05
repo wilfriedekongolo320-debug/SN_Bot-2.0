@@ -1,38 +1,83 @@
-// SunJinWoo - _antiarab.js creado por SinNombre +5215629885039
-  // Para configurar el idioma, en la raíz del proyecto, modifique el archivo config.json.
+/**
+// SunJinWoo - _antilink2.js creado por SinNombre +5215629885039
+// Bloquea TODOS los links excepto YouTube y el link del grupo
+**/
 
-const linkRegex = /https:/i;
-export async function before(m, {conn, isAdmin, isBotAdmin, text}) {
-    const idioma = global.db.data.users[m.sender].language || global.defaultLenguaje 
-    const _translate = JSON.parse(fs.readFileSync(`./src/languages/${idioma}.json`))
-    const tradutor = _translate.plugins._antilink2
+const linkRegex = /https?:\/\//i;
 
-  if (m.isBaileys && m.fromMe) {
-    return !0;
-  }
+const ALLOWED_DOMAINS = [
+  'youtube.com',
+  'youtu.be',
+  'www.youtube.com',
+];
+
+export async function before(m, { conn, isAdmin, isBotAdmin }) {
+  if (m.isBaileys && m.fromMe) return !0;
   if (!m.isGroup) return !1;
+  if (!m.text) return !0;
+
   const chat = global.db.data.chats[m.chat];
-  const delet = m.key.participant;
-  const bang = m.key.id;
+  if (!chat?.antiLink2) return !0;
+
   const bot = global.db.data.settings[this.user.jid] || {};
-  const user = `@${m.sender.split`@`[0]}`;
-  const isGroupLink = linkRegex.exec(m.text);
-  if (chat.antiLink2 && isGroupLink && !isAdmin) {
+  const isLink = linkRegex.exec(m.text);
+
+  if (isLink && !isAdmin) {
     if (isBotAdmin) {
-      const linkThisGroup = `https://chat.whatsapp.com/${await this.groupInviteCode(m.chat)}`;
-      const linkThisGroup2 = `https://www.youtube.com/`;
-      const linkThisGroup3 = `https://youtu.be/`;
-      if (m.text.includes(linkThisGroup)) return !0;
-      if (m.text.includes(linkThisGroup2)) return !0;
-      if (m.text.includes(linkThisGroup3)) return !0;
+      try {
+        const linkThisGroup = `https://chat.whatsapp.com/${await this.groupInviteCode(m.chat)}`;
+        if (m.text.includes(linkThisGroup)) return !0;
+      } catch {}
+
+      if (ALLOWED_DOMAINS.some(domain => m.text.includes(domain))) return !0;
     }
-    await this.sendMessage(m.chat, {text: tradutor.texto1, mentions: [m.sender]}, {quoted: m});
-    if (!isBotAdmin) return m.reply(tradutor.texto2);
+
+    const { realJid, lidFull } = await getParticipantIds.call(this, m.chat, m.sender);
+    const tag = `@${realJid.split('@')[0]}`;
+
+    await this.sendMessage(m.chat, {
+      text: `🚫 ${tag} los enlaces no están permitidos aquí.`,
+      mentions: [realJid]
+    }, { quoted: m });
+
+    if (!isBotAdmin) return m.reply('⚠️ No soy admin, no puedo expulsar.');
+
     if (isBotAdmin && bot.restrict) {
-      await conn.sendMessage(m.chat, {delete: {remoteJid: m.chat, fromMe: false, id: bang, participant: delet}});
-      const responseb = await conn.groupParticipantsUpdate(m.chat, [m.sender], 'remove');
-      if (responseb[0].status === '404') return;
-    } else if (!bot.restrict) return m.reply(tradutor.texto3);
+      await conn.sendMessage(m.chat, { delete: m.key });
+      await kickUser.call(this, m.chat, realJid, lidFull);
+    } else if (!bot.restrict) {
+      return m.reply('⚠️ El modo restrict está desactivado, no puedo expulsar.');
+    }
   }
   return !0;
+}
+
+async function getParticipantIds(chatId, senderJid) {
+  try {
+    const groupMeta = await this.groupMetadata(chatId);
+    const senderNum = senderJid.split('@')[0];
+    const found = groupMeta.participants.find(p => {
+      const jidNum = (p.jid || p.id || '').split('@')[0];
+      const lidNum = (p.lid || '').split('@')[0];
+      return jidNum === senderNum || lidNum === senderNum;
+    });
+    return {
+      realJid: found?.jid || found?.id || senderJid,
+      lidFull: found?.lid || null
+    };
+  } catch {
+    return { realJid: senderJid, lidFull: null };
+  }
+}
+
+async function kickUser(chatId, realJid, lidFull) {
+  try {
+    const r = await this.groupParticipantsUpdate(chatId, [realJid], 'remove');
+    if (r[0]?.status !== '404') return;
+  } catch {}
+  if (lidFull) {
+    try {
+      await this.groupParticipantsUpdate(chatId, [lidFull], 'remove');
+    } catch {}
+  }
 }

@@ -1,4 +1,32 @@
+/**
+ * ╔══════════════════════════════════════════════════════════════════╗
+ * ║                    main.js — Bot 2.0                            ║
+ * ║                                                                  ║
+ * ║  Correcciones aplicadas:                                        ║
+ * ║                                                                  ║
+ * ║  1. [FIX] Versión de protocolo WhatsApp ahora usa la versión    ║
+ * ║     más reciente automáticamente (version22.version) en lugar   ║
+ * ║     de estar hardcodeada, lo que causaba error 405.             ║
+ * ║                                                                  ║
+ * ║  2. [FIX] Manejo del error 405: ahora limpia la sesión          ║
+ * ║     corrupta y sale con process.exit(0) para evitar bucle       ║
+ * ║     infinito de reconexiones.                                    ║
+ * ║                                                                  ║
+ * ║  3. [FIX] purgeSession() y purgeOldFiles() ahora usan          ║
+ * ║     global.authFile en vez de ruta hardcodeada "MysticSession". ║
+ * ║                                                                  ║
+ * ║  4. [MEJORA] Organización del código con secciones claras.      ║
+ * ║                                                                  ║
+ * ║  Fecha: 2026-02-06                                               ║
+ * ╚══════════════════════════════════════════════════════════════════╝
+ */
+
 process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '1';
+
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 1: IMPORTS
+   ═══════════════════════════════════════════════════════════ */
+
 import './config.js';
 import './api.js';
 import { createRequire } from 'module';
@@ -24,6 +52,11 @@ import LidResolver from './src/libraries/LidResolver.js';
 const { DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, jidNormalizedUser, PHONENUMBER_MCC } = await import("baileys");
 import readline from 'readline';
 import NodeCache from 'node-cache';
+
+/* ��══════════════════════════════════════════════════════════
+   SECCIÓN 2: VARIABLES GLOBALES E INICIALIZACIÓN
+   ═══════════════════════════════════════════════════════════ */
+
 const { chain } = lodash;
 const PORT = process.env.PORT || process.env.SERVER_PORT || 3000;
 let stopped = 'close';
@@ -48,6 +81,10 @@ const __dirname = global.__dirname(import.meta.url);
 global.opts = new Object(yargs(process.argv.slice(2)).exitProcess(false).parse());
 global.prefix = new RegExp('^[#!/.]')
 global.db = new Low(/https?:\/\//.test(opts['db'] || '') ? new cloudDBAdapter(opts['db']) : new JSONFile(`${opts._[0] ? opts._[0] + '_' : ''}database.json`));
+
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 3: BASE DE DATOS
+   ═══════════════════════════════════════════════════════════ */
 
 global.loadDatabase = async function loadDatabase() {
   if (global.db.READ) {
@@ -75,7 +112,9 @@ global.loadDatabase = async function loadDatabase() {
 };
 loadDatabase();
 
-/* ------------------------------------------------*/
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 4: CLASE LidDataManager — GESTIÓN DE DATOS LID
+   ═══════════════════════════════════════════════════════════ */
 
 /**
  * Clase auxiliar para acceso a datos LID desde JSON
@@ -221,6 +260,10 @@ class LidDataManager {
 
 // Instancia del manejador de datos LID
 const lidDataManager = new LidDataManager();
+
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 5: FUNCIONES DE PROCESAMIENTO LID EN MENSAJES
+   ��══════════════════════════════════════════════════════════ */
 
 /**
  * FUNCIÓN MEJORADA: Procesar texto para resolver LIDs - VERSION MÁS ROBUSTA
@@ -487,10 +530,18 @@ async function interceptMessages(messages, lidResolver) {
   return processedMessages;
 }
 
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 6: CONEXIÓN A WHATSAPP
+   [FIX] Se usa version22.version en vez de versión hardcodeada
+   ═══════════════════════════════════════════════════════════ */
+
 const { state, saveCreds } = await useMultiFileAuthState(global.authFile);
 const version22 = await fetchLatestBaileysVersion();
 console.log(version22)
-const version = [2, 3000, 1025190524]; 
+
+// [FIX] Usar versión dinámica — la hardcodeada causaba error 405
+const version = version22.version;
+
 let phoneNumber = global.botnumber || process.argv.find(arg => arg.startsWith('--phone='))?.split('=')[1];
 const methodCodeQR = process.argv.includes('--method=qr');
 const methodCode = !!phoneNumber || process.argv.includes('--method=code');
@@ -508,6 +559,10 @@ if (!methodCodeQR && !methodCode && !fs.existsSync(`./${global.authFile}/creds.j
     }
   } while (opcion !== '1' && opcion !== '2' || fs.existsSync(`./${global.authFile}/creds.json`));
 }
+
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 7: FILTROS DE CONSOLA
+   ═══════════════════════════════════════════════════════════ */
 
 const filterStrings = [
   "Q2xvc2luZyBzdGFsZSBvcGVu",
@@ -535,6 +590,10 @@ process.on('uncaughtException', (err) => {
   if (filterStrings.includes(Buffer.from(err.message).toString('base64'))) return;
   console.error('Uncaught Exception:', err);
 });
+
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 8: OPCIONES DE CONEXIÓN Y SOCKET
+   ═══════════════════════════════════════════════════════════ */
 
 const connectionOptions = {
   logger: pino({ level: 'silent' }),
@@ -581,6 +640,10 @@ setTimeout(async () => {
   }
 }, 5000);
 
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 9: EMPAREJAMIENTO (QR / CÓDIGO DE TEXTO)
+   ═══════════════════════════════════════════════════════════ */
+
 if (!fs.existsSync(`./${global.authFile}/creds.json`)) {
   if (opcion === '2' || methodCode) {
     opcion = '2';
@@ -614,6 +677,10 @@ if (!fs.existsSync(`./${global.authFile}/creds.json`)) {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 10: INICIALIZACIÓN DEL BOT
+   ═══════════════════════════════════════════════════════════ */
+
 conn.isInit = false;
 conn.well = false;
 conn.logger.info(`[　ℹ️　] Cargando...\n`);
@@ -631,6 +698,10 @@ if (!opts['test']) {
 }
 
 if (opts['server']) (await import('./server.js')).default(global.conn, PORT);
+
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 11: FUNCIONES DE LIMPIEZA DE ARCHIVOS
+   ═══════════════════════════════════════════════════════════ */
 
 function clearTmp() {
   const tmp = [join(__dirname, './src/tmp')];
@@ -662,12 +733,19 @@ fs.watch(dirToWatchccc, (eventType, filename) => {
   }
 });
 
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 12: FUNCIONES DE LIMPIEZA DE SESIÓN
+   [FIX] Ahora usan global.authFile en vez de "MysticSession"
+   ═══════════════════════════════════════════════════════════ */
+
 function purgeSession() {
+  const sessionDir = `./${global.authFile}`;
+  if (!fs.existsSync(sessionDir)) return;
   let prekey = [];
-  let directorio = readdirSync("./MysticSession");
+  let directorio = readdirSync(sessionDir);
   let filesFolderPreKeys = directorio.filter(file => file.startsWith('pre-key-'));
   prekey = [...prekey, ...filesFolderPreKeys];
-  filesFolderPreKeys.forEach(files => unlinkSync(`./MysticSession/${files}`));
+  filesFolderPreKeys.forEach(files => unlinkSync(`${sessionDir}/${files}`));
 }
 
 function purgeSessionSB() {
@@ -687,9 +765,10 @@ function purgeSessionSB() {
 }
 
 function purgeOldFiles() {
-  const directories = ['./MysticSession/', './jadibts/'];
+  const directories = [`./${global.authFile}/`, './jadibts/'];
   const oneHourAgo = Date.now() - (60 * 60 * 1000);
   directories.forEach(dir => {
+    if (!fs.existsSync(dir)) return;
     readdirSync(dir, (err, files) => {
       if (err) throw err;
       files.forEach(file => {
@@ -706,6 +785,11 @@ function purgeOldFiles() {
     });
   });
 }
+
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 13: MANEJO DE CONEXIÓN Y RECONEXIÓN
+   [FIX] Error 405 ahora limpia sesión y sale limpiamente
+   ═══════════════════════════════════════════════════════════ */
 
 async function connectionUpdate(update) {
   let isFirstConnection = '';
@@ -754,11 +838,29 @@ async function connectionUpdate(update) {
     errorData.lastShown = now;
     return true;
   }
+
+  // [FIX] Manejo robusto del error 405 — limpia sesión y sale limpiamente
+  // Antes: solo imprimía un mensaje y dejaba que el bot entrara en bucle infinito
+  // Ahora: limpia la sesión corrupta y sale con exit(0) para que index.js NO lo reinicie
   if (reason == 405) {
-    //await fs.unlinkSync("./MysticSession/" + "creds.json");
-    console.log(chalk.bold.redBright(`[ ⚠️ ] Conexión replazada, Por favor espere un momento me voy a reiniciar...\nSi aparecen error vuelve a iniciar con : npm start`));
-    //process.send('reset');
+    console.log(chalk.bold.redBright(`[ ⚠️ ] Conexión reemplazada (error 405). Limpiando sesión...`));
+    const sessionPath = `./${global.authFile}`;
+    try {
+      if (fs.existsSync(path.join(sessionPath, 'creds.json'))) {
+        const files = fs.readdirSync(sessionPath);
+        for (const file of files) {
+          fs.unlinkSync(path.join(sessionPath, file));
+        }
+        console.log(chalk.yellow(`[ ℹ️ ] Sesión ${global.authFile} limpiada correctamente.`));
+      }
+    } catch (e) {
+      console.log(chalk.yellow(`[ ℹ️ ] No se pudo limpiar automáticamente.`));
+      console.log(chalk.yellow(`[ ℹ️ ] Elimina manualmente: rm -rf ./${global.authFile}`));
+    }
+    console.log(chalk.bold.yellowBright(`[ ℹ️ ] Reinicia el bot con: npm start`));
+    process.exit(0); // exit(0) para que index.js NO lo reinicie automáticamente
   }
+
   if (connection === 'close') {
     if (reason === DisconnectReason.badSession) {
       if (shouldLogError('badSession')) {
@@ -811,6 +913,10 @@ async function connectionUpdate(update) {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 14: HANDLER Y RECARGA DE PLUGINS
+   ═══════════════════════════════════════════════════════════ */
+
 process.on('uncaughtException', console.error);
 
 let isInit = true;
@@ -859,9 +965,6 @@ global.reloadHandler = async function (restatConn) {
   conn.handler = async function (chatUpdate) {
     try {
       if (chatUpdate.messages) {
-        // DEBUG: Log para rastrear el procesamiento
-        //console.log(`🔄 Procesando ${chatUpdate.messages.length} mensajes...`);
-
         // Interceptar y procesar mensajes para resolver LIDs
         chatUpdate.messages = await interceptMessages(chatUpdate.messages, lidResolver);
 
@@ -875,7 +978,7 @@ global.reloadHandler = async function (restatConn) {
               const fullyProcessedMessage = await processMessageForDisplay(message, lidResolver);
               chatUpdate.messages[i] = fullyProcessedMessage;
 
-              // DEBUG: Verificar si hay menciones LID sin resolver
+              // Verificar si hay menciones LID sin resolver
               const messageText = extractAllText(fullyProcessedMessage);
               if (messageText && messageText.includes('@') && /(@\d{8,20})/.test(messageText)) {
                 const lidMatches = messageText.match(/@(\d{8,20})/g);
@@ -923,7 +1026,10 @@ global.reloadHandler = async function (restatConn) {
   return true;
 };
 
-// Agregar funciones de utilidad al conn para acceso desde plugins
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 15: UTILIDADES LID PARA PLUGINS (conn.lid)
+   ═══════════════════════════════════════════════════════════ */
+
 conn.lid = {
   /**
    * Obtener información de usuario por LID
@@ -1061,6 +1167,10 @@ ${Object.entries(lidDataManager.getUsersByCountry())
   }
 };
 
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 16: CARGA DE PLUGINS
+   ═══════════════════════════════════════════════════════════ */
+
 const pluginFolder = global.__dirname(join(__dirname, './plugins/index'));
 const pluginFilter = (filename) => /\.js$/.test(filename);
 global.plugins = {};
@@ -1110,11 +1220,18 @@ Object.freeze(global.reload);
 watch(pluginFolder, global.reload);
 await global.reloadHandler();
 
+/* ═══════════════════════════════════════════════��═══════════
+   SECCIÓN 17: TAREAS PROGRAMADAS (INTERVALOS)
+   ═══════════════════════════════════════════════════════════ */
+
+// ═══════════════════════════════════════════════════════════
+// Limpiar archivos temporales cada 3 minutos
 setInterval(async () => {
   if (stopped === 'close' || !conn || !conn?.user) return;
   await clearTmp();
 }, 180000);
 
+// Actualizar bio/estado del bot cada 1 minuto
 setInterval(async () => {
   if (stopped === 'close' || !conn || !conn?.user) return;
   const _uptime = process.uptime() * 1000;
@@ -1160,6 +1277,10 @@ setInterval(async () => {
   }
 }, 30 * 60 * 1000); // Cada 30 minutos
 
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 18: FUNCIONES UTILITARIAS
+   ═══════════════════════════════════════════════════════════ */
+
 function clockString(ms) {
   const d = isNaN(ms) ? '--' : Math.floor(ms / 86400000);
   const h = isNaN(ms) ? '--' : Math.floor(ms / 3600000) % 24;
@@ -1167,6 +1288,10 @@ function clockString(ms) {
   const s = isNaN(ms) ? '--' : Math.floor(ms / 1000) % 60;
   return [d, 'd ', h, 'h ', m, 'm ', s, 's '].map((v) => v.toString().padStart(2, 0)).join('');
 }
+
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 19: MANEJO DE SALIDA DEL PROCESO
+   ═══════════════════════════════════════════════════════════ */
 
 // Manejo mejorado de salida del proceso
 const gracefulShutdown = () => {
@@ -1197,6 +1322,10 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error('❌ Error no manejado relacionado con LID:', reason);
   }
 });
+
+/* ═══════════════════════════════════════════════════════════
+   SECCIÓN 20: TEST DE DEPENDENCIAS DEL SISTEMA
+   ═══════════════════════════════════════════════════════════ */
 
 async function _quickTest() {
   const test = await Promise.all([

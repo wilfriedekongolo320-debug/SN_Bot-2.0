@@ -6,12 +6,21 @@ import { watchFile } from 'fs';
 const terminalImage = global.opts['img'] ? require('terminal-image') : '';
 const urlRegex = (await import('url-regex-safe')).default({ strict: false });
 
-// Define una longitud máxima para el mensaje
 const MAX_MESSAGE_LENGTH = 400;
 
 export default async function(m, conn = { user: {} }) {
   const _name = await conn.getName(m.sender);
-  const sender = PhoneNumber('+' + m.sender.replace('@s.whatsapp.net', '')).getNumber('international') + (_name ? ' ~' + _name : '');
+
+  // [FIX] Usar m.realSender (JID real) si existe, si no m.sender
+  const realSender = m.realSender || m.sender;
+  const senderNumber = realSender.replace('@s.whatsapp.net', '');
+  let sender;
+  try {
+    sender = PhoneNumber('+' + senderNumber).getNumber('international') + (_name ? ' ~' + _name : '');
+  } catch {
+    sender = '+' + senderNumber + (_name ? ' ~' + _name : '');
+  }
+
   const chat = await conn.getName(m.chat);
   let img;
   try {

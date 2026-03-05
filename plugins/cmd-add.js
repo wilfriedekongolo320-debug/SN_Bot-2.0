@@ -16,6 +16,6 @@ const handler = async (m, {conn, text, usedPrefix, command}) => {
   sticker[hash] = {text, mentionedJid: await m.mentionedJid, creator: m.sender, at: + new Date, locked: false};
   m.reply(`*${tradutor.texto5}*`);
 };
-handler.command = ['setcmd', 'addcmd', 'cmdadd', 'cmdset'];
+handler.command = ['addcmd'];
 handler.rowner = true;
 export default handler;

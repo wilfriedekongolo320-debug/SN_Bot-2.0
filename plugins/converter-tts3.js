@@ -1,23 +1,59 @@
 import fetch from 'node-fetch';
 
+// Tu API Key de ElevenLabs
+const apiKey = 'a0e2c6022f1aeb28b5020b1dd0faf6ee';
+
 const handler = async (m, { conn, usedPrefix, command, text }) => {
- const match = text.match(/^(\w+)\s*\|\s*(.+)/i);
- if (!match) {
- const voices = await getVoices();
- const voiceNames = voices.voices.map(voice => voice.name).join('\n◉ ');
- return m.reply(`*[❗] Formato de uso erroneo, voz o texto faltante.*\n\n*—◉ Ejemplo:*\n◉ ${usedPrefix + command} nombre_voz | texto\n\n*—◉ Ejemplo de uso:*\n◉ ${usedPrefix + command} ${voices.voices[0].name} | este es un texto de ejemplo\n\n*—◉ Lista de voces disponibles:*\n◉ ${voiceNames}`);
- }
- const [, voiceName, inputText] = match;
- const voices = await getVoices();
- const voice = voices.voices.find(voice => voice.name.toLowerCase() === voiceName.toLowerCase());
- if (!voice) {
- const voiceNames = voices.voices.map(voice => voice.name).join('\n◉ ');
- return m.reply(`[❗] No se encontró ninguna voz con el nombre "${voiceName}".\n\n—◉ Lista de voces disponibles:\n◉ ${voiceNames}`);
- }
- const audio = await convertTextToSpeech(inputText, voice.voice_id);
- if (audio) {
- conn.sendMessage(m.chat, { audio: audio.audio, fileName: `error.mp3`, mimetype: 'audio/mpeg', ptt: true }, { quoted: m });
- }
+  // 1. Extraer voz y texto (Soporta nombres con espacios como 'Fernando Martinez')
+  const match = text.match(/^([^|]+)\s*\|\s*(.+)/i);
+  
+  if (!match) {
+    const voicesData = await getVoices();
+    if (!voicesData || !voicesData.voices) return m.reply('*[❗] Error al conectar con la API de ElevenLabs.*');
+    
+    // Mostramos solo el primer nombre de cada voz para que sea más fácil de usar
+    const voiceList = voicesData.voices.map(v => v.name.split(' - ')[0]).join('\n◉ ');
+    return m.reply(`*[❗] Formato incorrecto.*\n\n*—◉ Uso:*\n◉ ${usedPrefix + command} nombre_voz | texto\n\n*—◉ Ejemplo:*\n◉ ${usedPrefix + command} Roger | Hola, ¿cómo estás?\n\n*—◉ Voces disponibles (puedes usar el primer nombre):*\n◉ ${voiceList}`);
+  }
+
+  let [, voiceName, inputText] = match;
+  voiceName = voiceName.trim().toLowerCase();
+  
+  const voicesData = await getVoices();
+  if (!voicesData || !voicesData.voices) return m.reply('*[❗] No se pudo obtener la lista de voces.*');
+
+  // 2. Búsqueda inteligente: Busca si el nombre ingresado está contenido en el nombre de la API
+  const voice = voicesData.voices.find(v => 
+    v.name.toLowerCase().includes(voiceName) || 
+    v.name.toLowerCase().split(' ')[0] === voiceName
+  );
+
+  if (!voice) {
+    const voiceList = voicesData.voices.map(v => v.name.split(' - ')[0]).join(', ');
+    return m.reply(`*[❗] La voz "${voiceName}" no existe.*\n\n*Prueba con:*\n${voiceList}`);
+  }
+
+  // 3. Generar el audio
+  try {
+    // Feedback visual (opcional)
+    if (m.react) m.react('🗣️');
+    
+    const audioBuffer = await convertTextToSpeech(inputText, voice.voice_id);
+
+    if (audioBuffer) {
+      await conn.sendMessage(m.chat, { 
+        audio: audioBuffer, 
+        fileName: `tts_${voiceName}.mp3`, 
+        mimetype: 'audio/mpeg', 
+        ptt: true 
+      }, { quoted: m });
+    } else {
+      throw new Error('No se generó el buffer de audio');
+    }
+  } catch (e) {
+    console.error(e);
+    m.reply('*[❗] Error al generar el audio. Revisa si te quedan caracteres en ElevenLabs.*');
+  }
 };
 
 handler.help = ['tts3'];
@@ -26,29 +62,50 @@ handler.command = ['tts3'];
 
 export default handler;
 
-const apiKey = 'a0e2c6022f1aeb28b5020b1dd0faf6ee';
-const getVoices = async () => {
-  const url = 'https://api.elevenlabs.io/v1/voices';
-  const options = { method: 'GET', headers: { 'Content-Type': 'application/json', 'xi-api-key': apiKey }};
-  try {
-    const response = await fetch(url, options);
-    const voices = await response.json();
-    return voices;
-  } catch (error) {
-    console.error('Error al obtener las voces:', error);
-    return [];
-  }
-};
+// --- Funciones de comunicación con la API ---
 
-const convertTextToSpeech = async (text, voiceId) => {
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
-  const options = { method: 'POST', headers: { 'Content-Type': 'application/json', 'xi-api-key': apiKey }, body: JSON.stringify({ text: text, model_id: 'eleven_monolingual_v1', voice_settings: { stability: 0.5, similarity_boost: 0.5 }})};
+async function getVoices() {
+  const url = 'https://api.elevenlabs.io/v1/voices';
   try {
-    const response = await fetch(url, options);
-    const audioBuffer = await response.buffer();
-    return { audio: audioBuffer };
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'xi-api-key': apiKey }
+    });
+    return await response.json();
   } catch (error) {
-    console.error('Error al generar el audio:', error);
-    return [];  
+    console.error('Error Voices:', error);
+    return null;
   }
-};
+}
+
+async function convertTextToSpeech(text, voiceId) {
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'xi-api-key': apiKey
+      },
+      body: JSON.stringify({
+        text: text,
+        model_id: 'eleven_multilingual_v2', // Mejor calidad en español
+        voice_settings: { 
+          stability: 0.5, 
+          similarity_boost: 0.75 
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('API Error:', errorText);
+      return null;
+    }
+
+    return await response.buffer();
+  } catch (error) {
+    console.error('Error TTS:', error);
+    return null;
+  }
+}

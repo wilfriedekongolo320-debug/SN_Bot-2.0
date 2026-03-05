@@ -16,6 +16,6 @@ const handler = async (m) => {
 
 handler.help = ['tourl'];
 handler.tags = ['converter'];
-handler.command = ['upload', 'uploader', 'tourl'];
+handler.command = ['tourl'];
 
 export default handler;

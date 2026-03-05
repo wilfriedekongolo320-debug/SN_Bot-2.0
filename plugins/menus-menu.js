@@ -8,9 +8,10 @@ const handler = async (m, { conn, usedPrefix, __dirname, isPrems }) => {
         const tradutor = _translate.plugins.menu;
 
         // SOBRESCRIBIR FORMATO - SOLUCIÓN AL PROBLEMA
-        tradutor.section_header = "┌───『 @category 』";
-        tradutor.command_item = "│ ➤ @cmd";
-        tradutor.section_footer = "└────────────✦";
+        tradutor.section_header = "╾╾╾╾ ⌬ @category ⌬ ╾╾╾╾";
+        tradutor.command_item = "  ➥ @cmd";
+//        tradutor.section_footer = "━━━━━━━━━━━━━━━━━━━━━━";
+        tradutor.section_footer = " ";
 
         const username = '@' + m.sender.split('@s.whatsapp.net')[0];
         const name = await conn.getName(m.sender);
@@ -29,7 +30,7 @@ const handler = async (m, { conn, usedPrefix, __dirname, isPrems }) => {
 
         // Diseño cabecera IDÉNTICO al original
         let headerInfo = `
-╭━━━━━━༺༻━━━━━━╮
+╾╾╾╾╾╾╾╾༺༻╾╾╾╾╾╾╾╾
 ${toBold('Nivel:')} ▹ ${level} ◃
 ${toBold('Exp:')} ▹ ${exp} ◃
 ${toBold('Rango:')} ▹ ${role} ◃
@@ -37,12 +38,11 @@ ${toBold('Límite:')} ▹ ${limit} ◃
 ${toBold('Diamantes:')} ▹ ${money} ◃
 ${toBold('Registros:')} ▹ ${rtotalreg}/${totalreg} ◃
 ${toBold('Activo:')} ▹ ${muptime} ◃
-╰━━━━━━༺༻━━━━━━╯
-╭━━━━━━༺༻━━━━━━╮
+╾╾╾╾╾╾╾╾༺༻╾╾╾╾╾╾╾╾
 「 *EL ARQUITECTO* 」
 » https://wa.me/${global.owner?.[0]?.[0] || '5215629885039'}
-╰━━━━━━༺༻━━━━━━╯
-        *🜲 COMANDOS DISPONIBLES 🜲*`;
+╾╾╾╾╾╾╾╾༺༻╾╾╾╾╾╾╾╾
+         *🜲 COMANDOS DISPONIBLES 🜲*`;
 
         // Preparar traducciones y estructura original
         const more = String.fromCharCode(8206);

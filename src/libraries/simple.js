@@ -1,29 +1,22 @@
-// Fix 2025 - MysitcBot and Fu*k You Meta® - LID Fix 98% - replace lids for numbers real.
+// ---------- Imports ----------
 import path from "path";
-import {
-    toAudio
-} from "./converter.js";
+import { toAudio } from "./converter.js";
 import chalk from "chalk";
 import fetch from "node-fetch";
 import PhoneNumber from "awesome-phonenumber";
 import fs from "fs";
 import util from "util";
-import {
-    fileTypeFromBuffer
-} from "file-type";
-import {
-    format
-} from "util";
-import {
-    fileURLToPath
-} from "url";
+import { fileTypeFromBuffer } from "file-type";
+import { format } from "util";
+import { fileURLToPath } from "url";
+import { randomBytes } from "crypto";  // ✅ FIX 1: import agregado
 import store from "./store.js";
+
+// ✅ FIX 2: Activar extensiones de prototipos ANTES de cualquier uso
+protoType();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/**
- * @type {import("baileys")}
- */
 const {
     default: _makeWaSocket,
     makeWALegacySocket,
@@ -43,19 +36,40 @@ const {
     PHONENUMBER_MCC,
 } = (await import("baileys")).default;
 
+const wm = "";
+
+// ---------- Función auxiliar resolveMentions ----------
+async function resolveMentions(text, jid, conn) {
+    if (!jid.endsWith("@g.us")) return text;
+    const mentions = text.match(/@(\d{5,20})/g);
+    if (!mentions) return text;
+    for (const mention of mentions) {
+        const numero = mention.substring(1);
+        const resolved = await String.prototype.resolveLidToRealJid.call(
+            `${numero}@lid`,
+            jid,
+            conn
+        );
+        if (resolved && resolved !== `${numero}@s.whatsapp.net`) {
+            const resolvedNumero = resolved.split("@")[0];
+            text = text.replace(new RegExp(`@${numero}`, 'g'), `@${resolvedNumero}`);
+        }
+    }
+    return text;
+}
+
+// ---------- makeWASocket ----------
 export function makeWASocket(connectionOptions, options = {}) {
-    /**
-     * @type {import("baileys").WASocket | import("baileys").WALegacySocket}
-     */
-    const conn = (global.opts["legacy"] ? makeWALegacySocket : _makeWaSocket)(
+    const conn = (global.opts?.["legacy"] ? makeWALegacySocket : _makeWaSocket)(
         connectionOptions,
     );
 
+    // ✅ FIX 8: Inicializar caché de LIDs
+    conn.lidCache = new Map();
+
     const sock = Object.defineProperties(conn, {
         chats: {
-            value: {
-                ...(options.chats || {})
-            },
+            value: { ...(options.chats || {}) },
             writable: true,
         },
         decodeJid: {
@@ -109,6 +123,7 @@ export function makeWASocket(connectionOptions, options = {}) {
         },
         sendNyanCat: {
             async value(jid, text = "", buffer, title, body, url, quoted, options) {
+                text = await resolveMentions(text, jid, conn);
                 if (buffer) {
                     try {
                         ((type = await conn.getFile(buffer)), (buffer = type.data));
@@ -141,6 +156,7 @@ export function makeWASocket(connectionOptions, options = {}) {
         },
         sendPayment: {
             async value(jid, amount, text, quoted, options) {
+                text = await resolveMentions(text, jid, conn);
                 conn.relayMessage(
                     jid, {
                         requestPaymentMessage: {
@@ -164,11 +180,6 @@ export function makeWASocket(connectionOptions, options = {}) {
             },
         },
         getFile: {
-            /**
-             * getBuffer hehe
-             * @param {fs.PathLike} PATH
-             * @param {Boolean} saveToFile
-             */
             async value(PATH, saveToFile = false) {
                 let res;
                 let filename;
@@ -209,15 +220,8 @@ export function makeWASocket(connectionOptions, options = {}) {
             },
             enumerable: true,
         },
-        waitEvent: {
-            /**
-             * waitEvent
-             * @param {String} eventName
-             * @param {Boolean} is
-             * @param {Number} maxTries
-             */
+        waitEvent: { 
             value(eventName, is = () => true, maxTries = 25) {
-                // Idk why this exist?
                 return new Promise((resolve, reject) => {
                     let tries = 0;
                     const on = (...args) => {
@@ -252,16 +256,6 @@ export function makeWASocket(connectionOptions, options = {}) {
             },
         },
         sendFile: {
-            /**
-             * Send Media/File with Automatic Type Specifier
-             * @param {String} jid
-             * @param {String|Buffer} path
-             * @param {String} filename
-             * @param {String} caption
-             * @param {import("baileys").proto.WebMessageInfo} quoted
-             * @param {Boolean} ptt
-             * @param {Object} options
-             */
             async value(
                 jid,
                 path,
@@ -271,6 +265,7 @@ export function makeWASocket(connectionOptions, options = {}) {
                 ptt = false,
                 options = {},
             ) {
+                caption = await resolveMentions(caption, jid, conn);
                 const type = await conn.getFile(path, true);
                 let {
                     res,
@@ -286,8 +281,6 @@ export function makeWASocket(connectionOptions, options = {}) {
                         if (e.json) throw e.json;
                     }
                 }
-                // const fileSize = fs.statSync(pathFile).size / 1024 / 1024
-                // if (fileSize >= 100) throw new Error('File size is too big!')
                 const opt = {};
                 if (quoted) opt.quoted = quoted;
                 if (!type) options.asDocument = true;
@@ -330,9 +323,6 @@ export function makeWASocket(connectionOptions, options = {}) {
                     mimetype,
                     fileName: filename || pathFile.split("/").pop(),
                 };
-                /**
-                 * @type {import("baileys").proto.WebMessageInfo}
-                 */
                 let m;
                 try {
                     m = await conn.sendMessage(jid, message, {
@@ -360,22 +350,36 @@ export function makeWASocket(connectionOptions, options = {}) {
             enumerable: true,
         },
         sendContact: {
-            /**
-             * Send Contact
-             * @param {String} jid
-             * @param {String[][]|String[]} data
-             * @param {import("baileys").proto.WebMessageInfo} quoted
-             * @param {Object} options
-             */
             async value(jid, data, quoted, options) {
                 if (!Array.isArray(data[0]) && typeof data[0] === "string")
                     data = [data];
                 const contacts = [];
+                const isGroup = jid.endsWith("@g.us");
                 for (let [number, name] of data) {
-                    number = number.replace(/[^0-9]/g, "");
+                    const originalInput = number;
+                    let resolvedJid = null;
+                    if (isGroup) {
+                        const lidStr = number.replace(/@lid$/, '');
+                        if (/^\d+$/.test(lidStr) && lidStr.length > 15) {
+                            try {
+                                resolvedJid = await String.prototype.resolveLidToRealJid.call(
+                                    number.includes('@') ? number : `${lidStr}@lid`,
+                                    jid,
+                                    this
+                                );
+                            } catch (e) {
+                                console.error('Error resolviendo LID en sendContact:', e);
+                            }
+                        }
+                    }
+                    if (resolvedJid) {
+                        number = resolvedJid.split('@')[0];
+                    } else {
+                        number = originalInput.replace(/[^0-9]/g, '');
+                    }
                     const njid = number + "@s.whatsapp.net";
                     const biz =
-                        (await conn.getBusinessProfile(njid).catch((_) => null)) || {};
+                        (await this.getBusinessProfile(njid).catch((_) => null)) || {};
                     const vcard = `
 BEGIN:VCARD
 VERSION:3.0
@@ -384,7 +388,7 @@ FN:${name.replace(/\n/g, "\\n")}
 TEL;type=CELL;type=VOICE;waid=${number}:${PhoneNumber("+" + number).getNumber("international")}${
             biz.description
               ? `
-X-WA-BIZ-NAME:${(conn.chats[njid]?.vname || conn.getName(njid) || name).replace(/\n/, "\\n")}
+X-WA-BIZ-NAME:${(this.chats[njid]?.vname || await this.getName(njid) || name).replace(/\n/, "\\n")}
 X-WA-BIZ-DESCRIPTION:${biz.description.replace(/\n/g, "\\n")}
 `.trim()
               : ""
@@ -396,7 +400,7 @@ END:VCARD
                         displayName: name
                     });
                 }
-                return await conn.sendMessage(
+                return await this.sendMessage(
                     jid, {
                         ...options,
                         contacts: {
@@ -415,13 +419,6 @@ END:VCARD
             enumerable: true,
         },
         reply: {
-            /**
-             * Reply to a message
-             * @param {String} jid
-             * @param {String|Buffer} text
-             * @param {import("baileys").proto.WebMessageInfo} quoted
-             * @param {Object} options
-             */
             value(jid, text = "", quoted, options) {
                 return Buffer.isBuffer(text) ?
                     conn.sendFile(jid, text, "file", "", quoted, false, options) :
@@ -434,12 +431,6 @@ END:VCARD
                     });
             },
         },
-
-        /**
-         * Send nativeFlowMessage
-         * By: https://github.com/GataNina-Li
-         */
-
         sendButtonMessages: {
             async value(jid, messages, quoted, options) {
                 messages.length > 1 ?
@@ -447,11 +438,6 @@ END:VCARD
                     await conn.sendNCarousel(jid, ...messages[0], quoted, options);
             },
         },
-
-        /**
-         * Send nativeFlowMessage
-         */
-
         sendNCarousel: {
             async value(
                 jid,
@@ -465,6 +451,7 @@ END:VCARD
                 quoted,
                 options,
             ) {
+                text = await resolveMentions(text, jid, conn);
                 let img, video;
                 if (buffer) {
                     if (/^https?:\/\//i.test(buffer)) {
@@ -622,9 +609,6 @@ END:VCARD
                 });
             },
         },
-        /**
-         * Send carouselMessage
-         */
         sendCarousel: {
             async value(
                 jid,
@@ -635,6 +619,8 @@ END:VCARD
                 quoted,
                 options,
             ) {
+                text = await resolveMentions(text, jid, conn);
+                text2 = await resolveMentions(text2, jid, conn);
                 if (messages.length > 1) {
                     const cards = await Promise.all(
                         messages.map(
@@ -647,6 +633,7 @@ END:VCARD
                                 urls,
                                 list,
                             ]) => {
+                                text = await resolveMentions(text, jid, conn);
                                 let img, video;
                                 if (/^https?:\/\//i.test(buffer)) {
                                     try {
@@ -713,14 +700,6 @@ END:VCARD
                                         id: btn[1],
                                     }),
                                 }));
-                                /*dynamicButtons.push(
-              (copy && (typeof copy === 'string' || typeof copy === 'number')) && {
-                name: 'cta_copy',
-                buttonParamsJson: JSON.stringify({
-                  display_text: 'Copy',
-                  copy_code: copy
-                })
-              });*/
                                 copy = Array.isArray(copy) ? copy : [copy];
                                 copy.map((copy) => {
                                     dynamicButtons.push({
@@ -751,24 +730,6 @@ END:VCARD
                                         }),
                                     });
                                 });
-
-                                /*list?.forEach(lister => {
-    dynamicButtons.push({
-        name: 'single_select',
-        buttonParamsJson: JSON.stringify({
-            title: lister[0],
-            sections: [{
-                    title: lister[1],
-                rows: [{
-                    header: lister[2],
-                    title: lister[3],
-                    description: lister[4], 
-                    id: lister[5]
-                }]
-            }]
-        })
-    });
-});*/
 
                                 return {
                                     body: proto.Message.InteractiveMessage.Body.fromObject({
@@ -877,60 +838,6 @@ END:VCARD
                 }
             },
         },
-
-        // sendButton: {
-        /**
-         * send Button
-         * @param {String} jid
-         * @param {String} text
-         * @param {String} footer
-         * @param {Buffer} buffer
-         * @param {String[] | String[][]} buttons
-         * @param {import("baileys").proto.WebMessageInfo} quoted
-         * @param {Object} options
-         */
-        /*   async value(jid, text = '', footer = '', buffer, buttons, quoted, options) {
-            let type;
-            if (Array.isArray(buffer)) (options = quoted, quoted = buttons, buttons = buffer, buffer = null);
-            else if (buffer) {
-              try {
-                (type = await conn.getFile(buffer), buffer = type.data);
-              } catch {
-                buffer = null;
-              }
-            }
-            if (!Array.isArray(buttons[0]) && typeof buttons[0] === 'string') buttons = [buttons];
-            if (!options) options = {};
-            const message = {
-              ...options,
-              [buffer ? 'caption' : 'text']: text || '',
-              footer,
-              buttons: buttons.map((btn) => ({
-                buttonId: !nullish(btn[1]) && btn[1] || !nullish(btn[0]) && btn[0] || '',
-                buttonText: {
-                  displayText: !nullish(btn[0]) && btn[0] || !nullish(btn[1]) && btn[1] || '',
-                },
-              })),
-              ...(buffer ?
-                            options.asLocation && /image/.test(type.mime) ? {
-                              location: {
-                                ...options,
-                                jpegThumbnail: buffer,
-                              },
-                            } : {
-                              [/video/.test(type.mime) ? 'video' : /image/.test(type.mime) ? 'image' : 'document']: buffer,
-                            } : {}),
-            };
-
-            return await conn.sendMessage(jid, message, {
-              quoted,
-              upload: conn.waUploadToServer,
-              ...options,
-            });
-          },
-          enumerable: true,
-        },*/
-        //-- new
         sendButton: {
             async value(
                 jid,
@@ -943,11 +850,11 @@ END:VCARD
                 quoted,
                 options,
             ) {
+                text = await resolveMentions(text, jid, conn);
                 let img, video;
 
                 if (/^https?:\/\//i.test(buffer)) {
                     try {
-                        // Obtener el tipo MIME de la URL
                         const response = await fetch(buffer);
                         const contentType = response.headers.get("content-type");
                         if (/^image\//i.test(contentType)) {
@@ -967,10 +874,10 @@ END:VCARD
                                 upload: conn.waUploadToServer
                             }, );
                         } else {
-                            console.error("Tipo MIME no compatible:", contentType);
+                            console.error("Incompatible MIME type:", contentType);
                         }
                     } catch (error) {
-                        console.error("Error al obtener el tipo MIME:", error);
+                        console.error("Failed to get MIME type:", error);
                     }
                 } else {
                     try {
@@ -993,7 +900,7 @@ END:VCARD
                             }, );
                         }
                     } catch (error) {
-                        console.error("Error al obtener el tipo de archivo:", error);
+                        console.error("Failed to get file type:", error);
                     }
                 }
 
@@ -1006,7 +913,6 @@ END:VCARD
                 }));
 
                 if (copy && (typeof copy === "string" || typeof copy === "number")) {
-                    // Añadir botón de copiar
                     dynamicButtons.push({
                         name: "cta_copy",
                         buttonParamsJson: JSON.stringify({
@@ -1016,7 +922,6 @@ END:VCARD
                     });
                 }
 
-                // Añadir botones de URL
                 if (urls && Array.isArray(urls)) {
                     urls.forEach((url) => {
                         dynamicButtons.push({
@@ -1067,78 +972,69 @@ END:VCARD
                 });
             },
         },
-
         sendList: {
-            async value(
-                jid,
-                title,
-                text,
-                buttonText,
-                listSections,
-                quoted,
-                options = {},
-            ) {
+            async value(jid, title, text, buttonText, listSections, quoted, options = {}) {
+                text = await resolveMentions(text, jid, conn);
                 const sections = [...listSections];
 
-                const message = {
-                    interactiveMessage: {
-                        header: {
-                            title: title
-                        },
-                        body: {
-                            text: text
-                        },
-                        nativeFlowMessage: {
-                            buttons: [{
-                                name: "single_select",
-                                buttonParamsJson: JSON.stringify({
-                                    title: buttonText,
-                                    sections,
-                                }),
-                            }, ],
-                            messageParamsJson: "",
-                        },
+                const interactiveMessage = {
+                    body: { text },
+                    nativeFlowMessage: {
+                        buttons: [{
+                            name: "single_select",
+                            buttonParamsJson: JSON.stringify({
+                                title: buttonText,
+                                sections,
+                            }),
+                        }],
+                        messageParamsJson: "",
                     },
                 };
-                await conn.relayMessage(jid, {
+
+                if (title) {
+                    interactiveMessage.header = { title };
+                }
+
+                const msg = generateWAMessageFromContent(jid, {
                     viewOnceMessage: {
-                        message
-                    }
-                }, {});
-            },
-        },
-
-        sendEvent: {
-            async value(jid, text, des, loc, link) {
-                let msg = generateWAMessageFromContent(
-                    jid, {
-                        messageContextInfo: {
-                            messageSecret: randomBytes(32),
+                        message: {
+                            interactiveMessage,
                         },
-                        eventMessage: {
-                            isCanceled: false,
-                            name: text,
-                            description: des,
-                            location: {
-                                degreesLatitude: 0,
-                                degreesLongitude: 0,
-                                name: loc,
-                            },
-                            joinLink: link,
-                            startTime: "m.messageTimestamp",
-                        },
-                    }, {},
-                );
-
-                conn.relayMessage(jid, msg.message, {
-                    messageId: msg.key.id,
+                    },
+                }, {
+                    userJid: conn.user.jid,
+                    quoted,
+                    upload: conn.waUploadToServer,
+                    ephemeralExpiration: WA_DEFAULT_EPHEMERAL,
+                    ...options,
                 });
+
+                await conn.relayMessage(jid, msg.message, { messageId: msg.key.id });
             },
             enumerable: true,
         },
-
+        sendEvent: {
+            async value(jid, text, des, loc, link) {
+                text = await resolveMentions(text, jid, conn);
+                des = await resolveMentions(des, jid, conn);
+                let msg = generateWAMessageFromContent(jid, {
+                    messageContextInfo: { messageSecret: randomBytes(32) },
+                    eventMessage: {
+                        isCanceled: false,
+                        name: text,
+                        description: des,
+                        location: { degreesLatitude: 0, degreesLongitude: 0, name: loc },
+                        joinLink: link,
+                        startTime: "m.messageTimestamp",
+                    },
+                }, {});
+                conn.relayMessage(jid, msg.message, { messageId: msg.key.id });
+            },
+            enumerable: true,
+        },
         sendPoll: {
             async value(jid, name = "", optiPoll, options) {
+                name = await resolveMentions(name, jid, conn);
                 if (!Array.isArray(optiPoll[0]) && typeof optiPoll[0] === "string")
                     optiPoll = [optiPoll];
                 if (!options) options = {};
@@ -1159,279 +1055,172 @@ END:VCARD
             },
         },
         sendHydrated: {
-            /**
-             *
-             * @param {String} jid
-             * @param {String} text
-             * @param {String} footer
-             * @param {fs.PathLike} buffer
-             * @param {String|string[]} url
-             * @param {String|string[]} urlText
-             * @param {String|string[]} call
-             * @param {String|string[]} callText
-             * @param {String[][]} buttons
-             * @param {import("baileys").proto.WebMessageInfo} quoted
-             * @param {Object} options
-             */
-            async value(
-                jid,
-                text = "",
-                footer = "",
-                buffer,
-                url,
-                urlText,
-                call,
-                callText,
-                buttons,
-                quoted,
-                options,
-            ) {
+            async value(jid, text = "", footer = "", buffer, url, urlText, call, callText, buttons, quoted, options) {
+                text = await resolveMentions(text, jid, this);
                 let type;
                 if (buffer) {
                     try {
-                        ((type = await conn.getFile(buffer)), (buffer = type.data));
+                        type = await this.getFile(buffer);
+                        buffer = type.data;
                     } catch {
                         buffer = buffer;
                     }
                 }
-                if (
-                    buffer &&
-                    !Buffer.isBuffer(buffer) &&
-                    (typeof buffer === "string" || Array.isArray(buffer))
-                )
-                    ((options = quoted),
-                        (quoted = buttons),
-                        (buttons = callText),
-                        (callText = call),
-                        (call = urlText),
-                        (urlText = url),
-                        (url = buffer),
-                        (buffer = null));
+                if (buffer && !Buffer.isBuffer(buffer) && (typeof buffer === "string" || Array.isArray(buffer))) {
+                    options = quoted;
+                    quoted = buttons;
+                    callText = call;
+                    call = urlText;
+                    urlText = url;
+                    url = buffer;
+                    buffer = null;
+                }
                 if (!options) options = {};
                 const templateButtons = [];
+
                 if (url || urlText) {
                     if (!Array.isArray(url)) url = [url];
                     if (!Array.isArray(urlText)) urlText = [urlText];
-                    templateButtons.push(
-                        ...(url
-                            .map((v, i) => [v, urlText[i]])
-                            .map(([url, urlText], i) => ({
-                                index: templateButtons.length + i + 1,
-                                urlButton: {
-                                    displayText: (!nullish(urlText) && urlText) ||
-                                        (!nullish(url) && url) ||
-                                        "",
-                                    url: (!nullish(url) && url) ||
-                                        (!nullish(urlText) && urlText) ||
-                                        "",
-                                },
-                            })) || []),
-                    );
+                    url.map((v, i) => [v, urlText[i]]).forEach(([url, urlText], i) => {
+                        templateButtons.push({
+                            index: templateButtons.length + i + 1,
+                            urlButton: {
+                                displayText: (!nullish(urlText) && urlText) || (!nullish(url) && url) || "",
+                                url: (!nullish(url) && url) || (!nullish(urlText) && urlText) || "",
+                            },
+                        });
+                    });
                 }
+
                 if (call || callText) {
                     if (!Array.isArray(call)) call = [call];
                     if (!Array.isArray(callText)) callText = [callText];
-                    templateButtons.push(
-                        ...(call
-                            .map((v, i) => [v, callText[i]])
-                            .map(([call, callText], i) => ({
-                                index: templateButtons.length + i + 1,
-                                callButton: {
-                                    displayText: (!nullish(callText) && callText) ||
-                                        (!nullish(call) && call) ||
-                                        "",
-                                    phoneNumber: (!nullish(call) && call) ||
-                                        (!nullish(callText) && callText) ||
-                                        "",
-                                },
-                            })) || []),
-                    );
+                    call.map((v, i) => [v, callText[i]]).forEach(([call, callText], i) => {
+                        templateButtons.push({
+                            index: templateButtons.length + i + 1,
+                            callButton: {
+                                displayText: (!nullish(callText) && callText) || (!nullish(call) && call) || "",
+                                phoneNumber: (!nullish(call) && call) || (!nullish(callText) && callText) || "",
+                            },
+                        });
+                    });
                 }
-                if (buttons.length) {
+
+                if (buttons && buttons.length) {
                     if (!Array.isArray(buttons[0])) buttons = [buttons];
-                    templateButtons.push(
-                        ...(buttons.map(([text, id], index) => ({
+                    buttons.forEach(([text, id], index) => {
+                        templateButtons.push({
                             index: templateButtons.length + index + 1,
                             quickReplyButton: {
                                 displayText: (!nullish(text) && text) || (!nullish(id) && id) || "",
                                 id: (!nullish(id) && id) || (!nullish(text) && text) || "",
                             },
-                        })) || []),
-                    );
+                        });
+                    });
                 }
+
                 const message = {
                     ...options,
                     [buffer ? "caption" : "text"]: text || "",
                     footer,
                     templateButtons,
-                    ...(buffer ?
-                        options.asLocation && /image/.test(type.mime) ?
-                        {
-                            location: {
-                                ...options,
-                                jpegThumbnail: buffer,
-                            },
-                        } :
-                        {
-                            [/video/.test(type.mime) ?
-                                "video" :
-                                /image/.test(type.mime) ?
-                                "image" :
-                                "document"
-                            ]: buffer,
-                        } :
-                        {}),
+                    ...(buffer ? (options.asLocation && /image/.test(type.mime) ?
+                        { location: { ...options, jpegThumbnail: buffer } } :
+                        { [/video/.test(type.mime) ? "video" : /image/.test(type.mime) ? "image" : "document"]: buffer }
+                    ) : {}),
                 };
-                return await conn.sendMessage(jid, message, {
+                return await this.sendMessage(jid, message, {
                     quoted,
-                    upload: conn.waUploadToServer,
+                    upload: this.waUploadToServer,
                     ...options,
                 });
             },
             enumerable: true,
         },
         sendHydrated2: {
-            /**
-             *
-             * @param {String} jid
-             * @param {String} text
-             * @param {String} footer
-             * @param {fs.PathLike} buffer
-             * @param {String|string[]} url
-             * @param {String|string[]} urlText
-             * @param {String|string[]} call
-             * @param {String|string[]} callText
-             * @param {String[][]} buttons
-             * @param {import("baileys").proto.WebMessageInfo} quoted
-             * @param {Object} options
-             */
-            async value(
-                jid,
-                text = "",
-                footer = "",
-                buffer,
-                url,
-                urlText,
-                url2,
-                urlText2,
-                buttons,
-                quoted,
-                options,
-            ) {
+            async value(jid, text = "", footer = "", buffer, url, urlText, url2, urlText2, buttons, quoted, options) {
+                text = await resolveMentions(text, jid, this);
                 let type;
                 if (buffer) {
                     try {
-                        ((type = await conn.getFile(buffer)), (buffer = type.data));
+                        type = await this.getFile(buffer);
+                        buffer = type.data;
                     } catch {
                         buffer = buffer;
                     }
                 }
-                if (
-                    buffer &&
-                    !Buffer.isBuffer(buffer) &&
-                    (typeof buffer === "string" || Array.isArray(buffer))
-                )
-                    ((options = quoted),
-                        (quoted = buttons),
-                        (buttons = callText),
-                        (callText = call),
-                        (call = urlText),
-                        (urlText = url),
-                        (url = buffer),
-                        (buffer = null));
+                if (buffer && !Buffer.isBuffer(buffer) && (typeof buffer === "string" || Array.isArray(buffer))) {
+                    options = quoted;
+                    quoted = buttons;
+                    urlText2 = url2;
+                    url2 = urlText;
+                    urlText = url;
+                    url = buffer;
+                    buffer = null;
+                }
                 if (!options) options = {};
                 const templateButtons = [];
+
                 if (url || urlText) {
                     if (!Array.isArray(url)) url = [url];
                     if (!Array.isArray(urlText)) urlText = [urlText];
-                    templateButtons.push(
-                        ...(url
-                            .map((v, i) => [v, urlText[i]])
-                            .map(([url, urlText], i) => ({
-                                index: templateButtons.length + i + 1,
-                                urlButton: {
-                                    displayText: (!nullish(urlText) && urlText) ||
-                                        (!nullish(url) && url) ||
-                                        "",
-                                    url: (!nullish(url) && url) ||
-                                        (!nullish(urlText) && urlText) ||
-                                        "",
-                                },
-                            })) || []),
-                    );
+                    url.map((v, i) => [v, urlText[i]]).forEach(([url, urlText], i) => {
+                        templateButtons.push({
+                            index: templateButtons.length + i + 1,
+                            urlButton: {
+                                displayText: (!nullish(urlText) && urlText) || (!nullish(url) && url) || "",
+                                url: (!nullish(url) && url) || (!nullish(urlText) && urlText) || "",
+                            },
+                        });
+                    });
                 }
+
                 if (url2 || urlText2) {
                     if (!Array.isArray(url2)) url2 = [url2];
                     if (!Array.isArray(urlText2)) urlText2 = [urlText2];
-                    templateButtons.push(
-                        ...(url2
-                            .map((v, i) => [v, urlText2[i]])
-                            .map(([url2, urlText2], i) => ({
-                                index: templateButtons.length + i + 1,
-                                urlButton: {
-                                    displayText: (!nullish(urlText2) && urlText2) ||
-                                        (!nullish(url2) && url2) ||
-                                        "",
-                                    url: (!nullish(url2) && url2) ||
-                                        (!nullish(urlText2) && urlText2) ||
-                                        "",
-                                },
-                            })) || []),
-                    );
+                    url2.map((v, i) => [v, urlText2[i]]).forEach(([url2, urlText2], i) => {
+                        templateButtons.push({
+                            index: templateButtons.length + i + 1,
+                            urlButton: {
+                                displayText: (!nullish(urlText2) && urlText2) || (!nullish(url2) && url2) || "",
+                                url: (!nullish(url2) && url2) || (!nullish(urlText2) && urlText2) || "",
+                            },
+                        });
+                    });
                 }
-                if (buttons.length) {
+
+                if (buttons && buttons.length) {
                     if (!Array.isArray(buttons[0])) buttons = [buttons];
-                    templateButtons.push(
-                        ...(buttons.map(([text, id], index) => ({
+                    buttons.forEach(([text, id], index) => {
+                        templateButtons.push({
                             index: templateButtons.length + index + 1,
                             quickReplyButton: {
                                 displayText: (!nullish(text) && text) || (!nullish(id) && id) || "",
                                 id: (!nullish(id) && id) || (!nullish(text) && text) || "",
                             },
-                        })) || []),
-                    );
+                        });
+                    });
                 }
+
                 const message = {
                     ...options,
                     [buffer ? "caption" : "text"]: text || "",
                     footer,
                     templateButtons,
-                    ...(buffer ?
-                        options.asLocation && /image/.test(type.mime) ?
-                        {
-                            location: {
-                                ...options,
-                                jpegThumbnail: buffer,
-                            },
-                        } :
-                        {
-                            [/video/.test(type.mime) ?
-                                "video" :
-                                /image/.test(type.mime) ?
-                                "image" :
-                                "document"
-                            ]: buffer,
-                        } :
-                        {}),
+                    ...(buffer ? (options.asLocation && /image/.test(type.mime) ?
+                        { location: { ...options, jpegThumbnail: buffer } } :
+                        { [/video/.test(type.mime) ? "video" : /image/.test(type.mime) ? "image" : "document"]: buffer }
+                    ) : {}),
                 };
-                return await conn.sendMessage(jid, message, {
+                return await this.sendMessage(jid, message, {
                     quoted,
-                    upload: conn.waUploadToServer,
+                    upload: this.waUploadToServer,
                     ...options,
                 });
             },
             enumerable: true,
         },
         cMod: {
-            /**
-             * cMod
-             * @param {String} jid
-             * @param {import("baileys").proto.WebMessageInfo} message
-             * @param {String} text
-             * @param {String} sender
-             * @param {*} options
-             * @returns
-             */
             value(jid, message, text = "", sender = conn.user.jid, options = {}) {
                 if (options.mentions && !Array.isArray(options.mentions))
                     options.mentions = [options.mentions];
@@ -1469,13 +1258,6 @@ END:VCARD
             enumerable: true,
         },
         copyNForward: {
-            /**
-             * Exact Copy Forward
-             * @param {String} jid
-             * @param {import("baileys").proto.WebMessageInfo} message
-             * @param {Boolean|Number} forwardingScore
-             * @param {Object} options
-             */
             async value(jid, message, forwardingScore = true, options = {}) {
                 let vtype;
                 if (options.readViewOnce && message.message.viewOnceMessage?.message) {
@@ -1515,15 +1297,6 @@ END:VCARD
             enumerable: true,
         },
         fakeReply: {
-            /**
-             * Fake Replies
-             * @param {String} jid
-             * @param {String|Object} text
-             * @param {String} fakeJid
-             * @param {String} fakeText
-             * @param {String} fakeGroupJid
-             * @param {String} options
-             */
             value(
                 jid,
                 text = "",
@@ -1548,13 +1321,6 @@ END:VCARD
             },
         },
         downloadM: {
-            /**
-             * Download media message
-             * @param {Object} m
-             * @param {String} type
-             * @param {fs.PathLike | fs.promises.FileHandle} saveToFile
-             * @return {Promise<fs.PathLike | fs.promises.FileHandle | Buffer>}
-             */
             async value(m, type, saveToFile) {
                 let filename;
                 if (!m || !(m.url || m.directPath)) return Buffer.alloc(0);
@@ -1570,163 +1336,57 @@ END:VCARD
             },
             enumerable: true,
         },
-/*parseMention: {
-    async value(text = "", groupChatId = null) {
-        try {
-            const esNumeroValido = (numero) => {
-                const len = numero.length;
-                if (len < 8 || len > 15) return false;
-                const codigosValidos = ["521", "1", "7", "20", "27", "30", "31", "32", "33", "34", "36", "39", "40", "41", "43", "44", "45", "46", "47", "48", "49", "51", "52", "53", "54", "55", "56", "57", "58", "60", "61", "62", "63", "64", "65", "66", "81", "82", "84", "86", "90", "91", "92", "93", "94", "95", "98", "211", "212", "213", "216", "218", "220", "221", "222", "223", "224", "225", "226", "227", "228", "229", "230", "231", "232", "233", "234", "235", "236", "237", "238", "239", "240", "241", "242", "243", "244", "245", "246", "248", "249", "250", "251", "252", "253", "254", "255", "256", "257", "258", "260", "261", "262", "263", "264", "265", "266", "267", "268", "269", "290", "291", "297", "298", "299", "350", "351", "352", "353", "354", "355", "356", "357", "358", "359", "370", "371", "372", "373", "374", "375", "376", "377", "378", "379", "380", "381", "382", "383", "385", "386", "387", "389", "420", "421", "423", "500", "501", "502", "503", "504", "505", "506", "507", "508", "509", "590", "591", "592", "593", "594", "595", "596", "597", "598", "599", "670", "672", "673", "674", "675", "676", "677", "678", "679", "680", "681", "682", "683", "685", "686", "687", "688", "689", "690", "691", "692", "850", "852", "853", "855", "856", "880", "886", "960", "961", "962", "963", "964", "965", "966", "967", "968", "970", "971", "972", "973", "974", "975", "976", "977", "978", "979", "992", "993", "994", "995", "996", "998"];
-                const valido = codigosValidos.some(codigo => numero.startsWith(codigo));
-                if (!valido) return false;
-                const numeroLimpio = numero.replace(/^(\d+)/, '').replace('@', '');
-                if (!/^\d+$/.test(numeroLimpio)) return false;
-                return true;
-            };
-            const resolveLidFromCache = async (jid, groupChatId) => {
-                if (!jid || !jid.toString().endsWith('@lid')) {
-                    return jid?.includes('@') ? jid : `${jid}@s.whatsapp.net`;
-                }
-                if (!groupChatId?.endsWith('@g.us')) {
-                    return jid;
-                }
-                const lidKey = jid.split('@')[0];
-                if (global.lidResolver) {
-                    const userInfo = global.lidResolver.getUserInfo(lidKey);
-                    if (userInfo && userInfo.jid && !userInfo.jid.endsWith('@lid') && !userInfo.notFound && !userInfo.error) {
-                        return userInfo.jid;
-                    }
-                    try {
-                        const resolvedJid = await global.lidResolver.resolveLid(jid, groupChatId, 2);
-                        if (resolvedJid && !resolvedJid.endsWith('@lid')) {
-                            return resolvedJid;
-                        }
-                    } catch (error) {
-                        console.log(`[parseMention] Error resolviendo ${jid}:`, error.message);
-                    }
-                }
-                if (typeof String.prototype.resolveLidToRealJid === 'function') {
-                    try {
-                        const resolved = await String.prototype.resolveLidToRealJid.call(
-                            jid, 
-                            groupChatId, 
-                            conn || this, 
-                            2, 
-                            1000
-                        );
-                        if (resolved && !resolved.endsWith('@lid')) {
-                            return resolved;
-                        }
-                    } catch (error) {
-                        console.log(`[parseMention] Error en fallback para ${jid}:`, error.message);
-                    }
-                }
-                return jid;
-            };
-            const mencionesEncontradas = text.match(/@(\d{5,20})/g) || [];
-            const mentions = [];
-            for (const m of mencionesEncontradas) {
-                const numero = m.substring(1);
-                if (esNumeroValido(numero)) {
-                    mentions.push(`${numero}@s.whatsapp.net`);
-                } else {
-                    const lidJid = `${numero}@lid`;
-                    const resolved = await resolveLidFromCache(lidJid, groupChatId);
-                    mentions.push(resolved);
-                }
-            }
-            return [...new Set(mentions.filter(mention => mention && mention.length > 0))];
-        } catch (error) {
-            console.error('[ERROR] En parseMention:', error.stack || error);
-            return [];
-        }
-    },
-    enumerable: true,
-},*/
         parseMention: {
-      value(text = "") {
-        try {
-          const esNumeroValido = (numero) => {
-            const len = numero.length;
-            if (len < 8 || len > 13) return false; 
-            if (len > 10 && numero.startsWith("9")) return false;
-            const codigosValidos = ["1","7","20","27","30","31","32","33","34","36","39","40","41","43","44","45","46","47","48","49","51","52","53","54","55","56","57","58","60","61","62","63","64","65","66","81","82","84","86","90","91","92","93","94","95","98","211","212","213","216","218","220","221","222","223","224","225","226","227","228","229","230","231","232","233","234","235","236","237","238","239","240","241","242","243","244","245","246","248","249","250","251","252","253","254","255","256","257","258","260","261","262","263","264","265","266","267","268","269","290","291","297","298","299","350","351","352","353","354","355","356","357","358","359","370","371","372","373","374","375","376","377","378","379","380","381","382","383","385","386","387","389","420","421","423","500","501","502","503","504","505","506","507","508","509","590","591","592","593","594","595","596","597","598","599","670","672","673","674","675","676","677","678","679","680","681","682","683","685","686","687","688","689","690","691","692","850","852","853","855","856","880","886","960","961","962","963","964","965","966","967","968","970","971","972","973","974","975","976","977","978","979","992","993","994","995","996","998"]; 
-            return codigosValidos.some((codigo) => numero.startsWith(codigo));
-          };
-          return (text.match(/@(\d{5,20})/g) || []).map((m) => m.substring(1)).map((numero) => esNumeroValido(numero) ? `${numero}@s.whatsapp.net` : `${numero}@lid`, );
-        } catch (error) {
-          console.error("Error:", error);
-          return [];
-        }
-      },
-      enumerable: true,
-    },
+            value(text = "") {
+                try {
+                    return (text.match(/@(\d{5,20})/g) || []).map((m) => m.substring(1)).map((numero) => `${numero}@s.whatsapp.net`);
+                } catch (error) {
+                    console.error("Error:", error);
+                    return [];
+                }
+            },
+            enumerable: true,
+        },
         getName: {
-            /**
-             * Get name from jid
-             * @param {String} jid
-             * @param {Boolean} withoutContact
-             */
             value(jid = "", withoutContact = false) {
                 try {
-                    if (
-                        !jid ||
-                        typeof jid !== "string" ||
-                        jid.includes("No SenderKeyRecord")
-                    )
+                    if (!jid || typeof jid !== "string" || jid.includes("No SenderKeyRecord"))
                         return "";
                     jid = conn.decodeJid(jid);
                     withoutContact = conn.withoutContact || withoutContact;
-                    let v;
                     if (jid.endsWith("@g.us")) {
-                        return new Promise(async (resolve) => {
-                            try {
-                                v = conn.chats[jid] || {};
-                                if (!(v.name || v.subject))
-                                    v = await conn?.groupMetadata(jid).catch(() => ({}));
-                                resolve(
-                                    v.name ||
-                                    v.subject ||
-                                    PhoneNumber(
-                                        "+" + jid.replace("@s.whatsapp.net", ""),
-                                    ).getNumber("international"),
-                                );
-                            } catch (e) {
-                                resolve("");
+                        const chat = this.chats[jid];
+                        const subject = chat?.subject || chat?.metadata?.subject;
+                        if (subject) return subject;
+                        const numero = jid.replace("@g.us", "");
+                        this.groupMetadata(jid).then(metadata => {
+                            if (metadata?.subject) {
+                                if (!this.chats[jid]) this.chats[jid] = {};
+                                this.chats[jid].subject = metadata.subject;
+                                this.chats[jid].metadata = metadata;
                             }
-                        });
+                        }).catch(() => {});
+                        return PhoneNumber("+" + numero).getNumber("international") || numero;
                     } else {
-                        v =
-                            jid === "0@s.whatsapp.net" ?
-                            {
-                                jid,
-                                vname: "WhatsApp"
-                            } :
-                            areJidsSameUser(jid, conn.user.id) ?
-                            conn.user :
-                            conn.chats[jid] || {};
-                        return (
-                            (withoutContact ? "" : v.name) ||
+                        const v = jid === "0@s.whatsapp.net"
+                            ? { jid, vname: "WhatsApp" }
+                            : areJidsSameUser(jid, this.user?.id)
+                                ? this.user
+                                : this.chats[jid] || {};
+                        return (withoutContact ? "" : v.name) ||
                             v.subject ||
                             v.vname ||
                             v.notify ||
                             v.verifiedName ||
-                            PhoneNumber("+" + jid.replace("@s.whatsapp.net", "")).getNumber(
-                                "international",
-                            )
-                        );
+                            PhoneNumber("+" + jid.replace("@s.whatsapp.net", "")).getNumber("international");
                     }
-                } catch (error) {
+                } catch {
                     return "";
                 }
             },
+            enumerable: true,
         },
         loadMessage: {
-            /**
-             *
-             * @param {String} messageID
-             * @returns {import("baileys").proto.WebMessageInfo}
-             */
             value(messageID) {
                 return Object.entries(conn.chats)
                     .filter(([_, {
@@ -1743,56 +1403,28 @@ END:VCARD
             enumerable: true,
         },
         sendGroupV4Invite: {
-            /**
-             * sendGroupV4Invite
-             * @param {String} jid
-             * @param {*} participant
-             * @param {String} inviteCode
-             * @param {Number} inviteExpiration
-             * @param {String} groupName
-             * @param {String} caption
-             * @param {Buffer} jpegThumbnail
-             * @param {*} options
-             */
-            async value(
-                jid,
-                participant,
-                inviteCode,
-                inviteExpiration,
-                groupName = "unknown subject",
-                caption = "Invitation to join my WhatsApp group",
-                jpegThumbnail,
-                options = {},
-            ) {
+            async value(jid, participant, inviteCode, inviteExpiration, groupName = "unknown subject", caption = "Invitation to join my WhatsApp group", jpegThumbnail, options = {}) {
+                caption = await resolveMentions(caption, jid, this);
                 const msg = proto.Message.fromObject({
                     groupInviteMessage: proto.GroupInviteMessage.fromObject({
                         inviteCode,
-                        inviteExpiration: parseInt(inviteExpiration) ||
-                            +new Date(new Date() + 3 * 86400000),
+                        inviteExpiration: parseInt(inviteExpiration) || +new Date(new Date() + 3 * 86400000),
                         groupJid: jid,
-                        groupName: (groupName ? groupName : await conn.getName(jid)) || null,
-                        jpegThumbnail: Buffer.isBuffer(jpegThumbnail) ?
-                            jpegThumbnail :
-                            null,
+                        groupName: groupName ? groupName : this.getName(jid) || null,
+                        jpegThumbnail: Buffer.isBuffer(jpegThumbnail) ? jpegThumbnail : null,
                         caption,
                     }),
                 });
                 const message = generateWAMessageFromContent(participant, msg, options);
-                await conn.relayMessage(participant, message.message, {
+                await this.relayMessage(participant, message.message, {
                     messageId: message.key.id,
-                    additionalAttributes: {
-                        ...options
-                    },
+                    additionalAttributes: { ...options },
                 });
                 return message;
             },
             enumerable: true,
         },
         processMessageStubType: {
-            /**
-             * to process MessageStubType
-             * @param {import("baileys").proto.WebMessageInfo} m
-             */
             async value(m) {
                 if (!m.messageStubType) return;
                 const chat = conn.decodeJid(
@@ -1857,16 +1489,11 @@ END:VCARD
             },
         },
         pushMessage: {
-            /**
-             * pushMessage
-             * @param {import("baileys").proto.WebMessageInfo[]} m
-             */
             async value(m) {
                 if (!m) return;
                 if (!Array.isArray(m)) m = [m];
                 for (const message of m) {
                     try {
-                        // if (!(message instanceof proto.WebMessageInfo)) continue // https://github.com/adiwajshing/Baileys/pull/696/commits/6a2cb5a4139d8eb0a75c4c4ea7ed52adc0aec20f
                         if (!message) continue;
                         if (
                             message.messageStubType &&
@@ -1888,71 +1515,48 @@ END:VCARD
                             message.message?.senderKeyDistributionMessage?.groupId ||
                             "",
                         );
-                        if (message.message?.[mtype]?.contextInfo?.quotedMessage) {
-                            /**
-                             * @type {import("baileys").proto.IContextInfo}
-                             */
-                            const context = message.message[mtype].contextInfo;
-                            let participant = conn.decodeJid(context.participant);
-                            const remoteJid = conn.decodeJid(
-                                context.remoteJid || participant,
+                        const isGroup = chat.endsWith("@g.us");
+
+                        const resolveLidIfNeeded = async (jid, groupJid) => {
+                            if (typeof jid === 'string' && jid.includes('@lid') && groupJid?.endsWith('@g.us')) {
+                                return await String.prototype.resolveLidToRealJid.call(jid, groupJid, conn);
+                            }
+                            return jid;
+                        };
+
+                        if (message.participant) {
+                            message.participant = await resolveLidIfNeeded(message.participant, chat);
+                        }
+                        if (message.key.participant) {
+                            message.key.participant = await resolveLidIfNeeded(message.key.participant, chat);
+                        }
+
+                        if (message.message?.[mtype]?.contextInfo?.mentionedJid) {
+                            const mentioned = message.message[mtype].contextInfo.mentionedJid;
+                            message.message[mtype].contextInfo.mentionedJid = await Promise.all(
+                                mentioned.map(j => resolveLidIfNeeded(j, chat))
                             );
-                            /**
-                             * @type {import("baileys").proto.IMessage}
-                             *
-                             */
-                            const quoted = message.message[mtype].contextInfo.quotedMessage;
-                            if (remoteJid && remoteJid !== "status@broadcast" && quoted) {
-                                let qMtype = Object.keys(quoted)[0];
-                                if (qMtype == "conversation") {
-                                    quoted.extendedTextMessage = {
-                                        text: quoted[qMtype]
-                                    };
-                                    delete quoted.conversation;
-                                    qMtype = "extendedTextMessage";
-                                }
-                                if (!quoted[qMtype].contextInfo)
-                                    quoted[qMtype].contextInfo = {};
-                                quoted[qMtype].contextInfo.mentionedJid =
-                                    context.mentionedJid ||
-                                    quoted[qMtype].contextInfo.mentionedJid || [];
-                                const isGroup = remoteJid.endsWith("g.us");
-                                if (isGroup && !participant) participant = remoteJid;
-                                const qM = {
-                                    key: {
-                                        remoteJid,
-                                        fromMe: areJidsSameUser(conn.user.jid, remoteJid),
-                                        id: context.stanzaId,
-                                        participant,
-                                    },
-                                    message: JSON.parse(JSON.stringify(quoted)),
-                                    ...(isGroup ? {
-                                        participant
-                                    } : {}),
-                                };
-                                let qChats = conn.chats[participant];
-                                if (!qChats)
-                                    qChats = conn.chats[participant] = {
-                                        id: participant,
-                                        isChats: !isGroup,
-                                    };
-                                if (!qChats.messages) qChats.messages = {};
-                                if (!qChats.messages[context.stanzaId] && !qM.key.fromMe)
-                                    qChats.messages[context.stanzaId] = qM;
-                                let qChatsMessages;
-                                if (
-                                    (qChatsMessages = Object.entries(qChats.messages)).length > 40
-                                )
-                                    qChats.messages = Object.fromEntries(
-                                        qChatsMessages.slice(30, qChatsMessages.length),
-                                    ); // maybe avoid memory leak
+                        }
+
+                        const quotedContext = message.message?.[mtype]?.contextInfo;
+                        if (quotedContext?.participant) {
+                            quotedContext.participant = await resolveLidIfNeeded(quotedContext.participant, quotedContext.remoteJid);
+                        }
+                        if (quotedContext?.quotedMessage) {
+                            const qMsg = quotedContext.quotedMessage;
+                            const qType = Object.keys(qMsg)[0];
+                            if (qMsg[qType]?.contextInfo?.mentionedJid) {
+                                qMsg[qType].contextInfo.mentionedJid = await Promise.all(
+                                    qMsg[qType].contextInfo.mentionedJid.map(j => resolveLidIfNeeded(j, quotedContext.remoteJid))
+                                );
                             }
                         }
+
                         if (!chat || chat === "status@broadcast") continue;
-                        const isGroup = chat.endsWith("@g.us");
+                        const isGroupChat = chat.endsWith("@g.us");
                         let chats = conn.chats[chat];
                         if (!chats) {
-                            if (isGroup) await conn.insertAllGroup().catch(console.error);
+                            if (isGroupChat) await conn.insertAllGroup().catch(console.error);
                             chats = conn.chats[chat] = {
                                 id: chat,
                                 isChats: true,
@@ -1961,7 +1565,7 @@ END:VCARD
                         }
                         let metadata;
                         let sender;
-                        if (isGroup) {
+                        if (isGroupChat) {
                             if (!chats.subject || !chats.metadata) {
                                 metadata =
                                     (await conn.groupMetadata(chat).catch((_) => ({}))) || {};
@@ -2020,42 +1624,18 @@ END:VCARD
             },
         },
         serializeM: {
-            /**
-             * Serialize Message, so it easier to manipulate
-             * @param {import("baileys").proto.WebMessageInfo} m
-             */
             value(m) {
                 return smsg(conn, m);
             },
         },
-        ...(typeof conn.chatRead !== "function" ?
-            {
-                chatRead: {
-                    /**
-                     * Read message
-                     * @param {String} jid
-                     * @param {String|undefined|null} participant
-                     * @param {String} messageID
-                     */
-                    value(jid, participant = conn.user.jid, messageID) {
-                        return conn.sendReadReceipt(jid, participant, [messageID]);
-                    },
-                    enumerable: true,
-                },
-            } :
-            {}),
         ...(typeof conn.setStatus !== "function" ?
             {
                 setStatus: {
-                    /**
-                     * setStatus bot
-                     * @param {String} status
-                     */
                     value(status) {
                         return conn.query({
                             tag: "iq",
                             attrs: {
-                                to: S_WHATSAPP_NET,
+                                to: 's.whatsapp.net',
                                 type: "set",
                                 xmlns: "status",
                             },
@@ -2063,24 +1643,31 @@ END:VCARD
                                 tag: "status",
                                 attrs: {},
                                 content: Buffer.from(status, "utf-8"),
-                            }, ],
+                            }],
                         });
                     },
                     enumerable: true,
                 },
             } :
             {}),
+        ...(typeof conn.chatRead !== "function" ?
+            {
+                chatRead: {
+                    value(jid, participant = conn.user.jid, messageID) {
+                        return conn.sendReadReceipt(jid, participant, [messageID]);
+                    },
+                    enumerable: true,
+                },
+            } :
+            {}),
     });
+
     if (sock.user?.id) sock.user.jid = sock.decodeJid(sock.user.id);
     store.bind(sock);
     return sock;
 }
-/**
- * Serialize Message
- * @param {ReturnType<typeof makeWASocket>} conn
- * @param {import("baileys").proto.WebMessageInfo} m
- * @param {Boolean} hasParent
- */
+
+// ---------- smsg ----------
 export function smsg(conn, m, hasParent) {
     if (!m) return m;
     const M = proto.WebMessageInfo;
@@ -2134,8 +1721,7 @@ export function smsg(conn, m, hasParent) {
     }
 }
 
-// https://github.com/Nurutomo/wabot-aq/issues/490
-// Fix 2025 - @BrunoSobrino - LID Resolved
+// ---------- serialize ----------
 export function serialize() {
     const MediaType = ["imageMessage", "videoMessage", "audioMessage", "stickerMessage", "documentMessage"];
     const safeEndsWith = (str, suffix) =>
@@ -2176,7 +1762,6 @@ export function serialize() {
                     const sender = this.sender || "";
                     const messageId = this.id || "";
                     const isFromBot = this?.fromMe || areJidsSameUser(userId, sender);
-                    //if (!isFromBot) return false;
                     const baileysStarts = ['NJX-', 'Lyru-', 'META-', 'EvoGlobalBot-', 'FizzxyTheGreat-', 'BAE5', '3EB0', 'B24E', '8SCO', 'SUKI', 'MYSTIC-'];
                     const hasKnownPrefix = baileysStarts.some(prefix => messageId.startsWith(prefix));
                             const isSukiPattern = /^SUKI[A-F0-9]+$/.test(messageId);
@@ -2346,40 +1931,9 @@ export function serialize() {
         mentionedJid: {
             get() {
                 try {
-                    const mentioned = this.conn.parseMention(this.text).length > 0 ? this.conn.parseMention(this.text) : this.msg?.contextInfo?.mentionedJid || [];
-                    const groupChatId = this.chat?.endsWith("@g.us") ? this.chat : null;
-
-                    const processJid = (user) => {
-                        try {
-                            if (user && typeof user === "object") {
-                                user = user.lid || user.jid || user.id || "";
-                            }
-                            if (typeof user === "string" && user.includes("@lid") && groupChatId) {
-                                const resolved = String.prototype.resolveLidToRealJid.call(
-                                    user,
-                                    groupChatId,
-                                    this.conn
-                                );
-                                return resolved.then(res => typeof res === "string" ? res : user);
-                            }
-                            return Promise.resolve(user);
-                        } catch (e) {
-                            console.error("Error processing JID:", user, e);
-                            return Promise.resolve(user);
-                        }
-                    };
-
-                    const processed = mentioned.map(processJid);
-
-                    return Promise.all(processed)
-                        .then(jids => jids.filter(jid => jid && typeof jid === "string"))
-                        .catch(e => {
-                            console.error("Error en mentionedJid getter:", e);
-                            return [];
-                        });
-                } catch (e) {
-                    console.error("Error en mentionedJid getter:", e);
-                    return Promise.resolve([]);
+                    return this.msg?.contextInfo?.mentionedJid || [];
+                } catch {
+                    return [];
                 }
             },
             enumerable: true,
@@ -2473,13 +2027,39 @@ export function serialize() {
             enumerable: true,
         },
         cMod: {
-            value(jid, text = "", sender = this.sender, options = {}) {
-                try {
-                    return this.conn?.cMod?.(jid, this, text, sender, options);
-                } catch (e) {
-                    console.error("Error en cMod:", e);
-                    return Promise.reject(e);
+            value(jid, message, text = "", sender = conn.user.jid, options = {}) {
+                if (options.mentions && !Array.isArray(options.mentions))
+                    options.mentions = [options.mentions];
+                const copy = message.toJSON();
+                delete copy.message.messageContextInfo;
+                delete copy.message.senderKeyDistributionMessage;
+                const mtype = Object.keys(copy.message)[0];
+                const msg = copy.message;
+                const content = msg[mtype];
+                if (typeof content === "string") msg[mtype] = text || content;
+                else if (content.caption) content.caption = text || content.caption;
+                else if (content.text) content.text = text || content.text;
+                if (typeof content !== "string") {
+                    msg[mtype] = {
+                        ...content,
+                        ...options
+                    };
+                    msg[mtype].contextInfo = {
+                        ...(content.contextInfo || {}),
+                        mentionedJid: options.mentions || content.contextInfo?.mentionedJid || [],
+                    };
                 }
+                if (copy.participant)
+                    sender = copy.participant = sender || copy.participant;
+                else if (copy.key.participant)
+                    sender = copy.key.participant = sender || copy.key.participant;
+                if (copy.key.remoteJid.includes("@s.whatsapp.net"))
+                    sender = sender || copy.key.remoteJid;
+                else if (copy.key.remoteJid.includes("@broadcast"))
+                    sender = sender || copy.key.remoteJid;
+                copy.key.remoteJid = jid;
+                copy.key.fromMe = areJidsSameUser(sender, conn.user.id) || false;
+                return proto.WebMessageInfo.fromObject(copy);
             },
             enumerable: true,
         },
@@ -2583,8 +2163,7 @@ export function serialize() {
                                     const sender = this.sender || "";
                                     const messageId = this.id || "";
                                     const isFromBot = this?.fromMe || areJidsSameUser(userId, sender);
-                                    //if (!isFromBot) return false;
-                                    const baileysStarts = ['NJX-', 'Lyru-', 'META-', 'EvoGlobalBot-', 'FizzxyTheGreat-', 'BAE5', '3EB0', 'B24E', '8SCO', 'SUKI', 'MYSTIC-'];
+                                    const baileysStarts = ['NJX-', 'Lyru-', 'META-', 'EvoGlobalBot-', 'FizzxyTheGreat-', 'BAE5', '3EB0', 'B24E', '8SCO', 'SUKI', 'SUNGINWO-'];
                                     const hasKnownPrefix = baileysStarts.some(prefix => messageId.startsWith(prefix));
                                                     const isSukiPattern = /^SUKI[A-F0-9]+$/.test(messageId);
                                                                         const isMysticPattern = /^MYSTIC[A-F0-9]+$/.test(messageId);
@@ -2605,18 +2184,13 @@ export function serialize() {
                                                 this.chat;
                                         }
                                         const parsedJid = safeDecodeJid(rawParticipant, self.conn);
-                                        if (parsedJid && parsedJid.includes("@lid")) {
-                                            const groupChatId = this.chat?.endsWith("@g.us") ? this.chat : null;
-                                            if (groupChatId) {
-                                                return String.prototype.resolveLidToRealJid.call(
-                                                    parsedJid,
-                                                    groupChatId,
-                                                    self.conn
-                                                );
-                                            }
+                                        const lidCache = self.conn?.lidCache || new Map();
+                                        let sender = parsedJid;
+                                        if (sender.includes("@s.whatsapp.net")) {
+                                            const lid = lidCache.get(sender);
+                                            if (lid) sender = lid;
                                         }
-
-                                        return parsedJid;
+                                        return sender;
                                     } catch (e) {
                                         console.error("Error en quoted sender getter:", e);
                                         return "";
@@ -2646,37 +2220,7 @@ export function serialize() {
                             },
                             mentionedJid: {
                                 get() {
-                                    const mentioned =
-                                        q?.contextInfo?.mentionedJid ||
-                                        self.getQuotedObj()?.mentionedJid || [];
-                                    const groupChatId = this.chat?.endsWith("@g.us") ? this.chat : null;
-
-                                    const processJid = (user) => {
-                                        try {
-                                            if (user && typeof user === "object") {
-                                                user = user.lid || user.jid || user.id || "";
-                                            }
-                                            if (typeof user === "string" && user.includes("@lid") && groupChatId) {
-                                                const resolved = String.prototype.resolveLidToRealJid.call(
-                                                    user,
-                                                    groupChatId,
-                                                    self.conn
-                                                );
-                                                return resolved.then(res => typeof res === "string" ? res : user);
-                                            }
-                                            return Promise.resolve(user);
-                                        } catch (e) {
-                                            console.error("Error processing JID:", user, e);
-                                            return Promise.resolve(user);
-                                        }
-                                    };
-                                    const processed = mentioned.map(processJid);
-                                    return Promise.all(processed)
-                                        .then(jids => jids.filter(jid => jid && typeof jid === "string"))
-                                        .catch(e => {
-                                            console.error("Error in mentionedJid processing:", e);
-                                            return mentioned.filter(jid => jid && typeof jid === "string");
-                                        });
+                                    return q?.contextInfo?.mentionedJid || [];
                                 },
                                 enumerable: true,
                             },
@@ -2790,168 +2334,124 @@ export function serialize() {
     });
 }
 
-    export function logic(check, inp, out) {
-        if (inp.length !== out.length)
-            throw new Error("Input and Output must have same length");
-        for (const i in inp)
-            if (util.isDeepStrictEqual(check, inp[i])) return out[i];
-        return null;
-    }
+// ---------- Funciones exportadas adicionales ----------
+export function logic(check, inp, out) {
+    if (inp.length !== out.length)
+        throw new Error("Input and Output must have same length");
+    for (const i in inp)
+        if (util.isDeepStrictEqual(check, inp[i])) return out[i];
+    return null;
+}
 
-    export function protoType() {
-        Buffer.prototype.toArrayBuffer = function toArrayBufferV2() {
-            const ab = new ArrayBuffer(this.length);
-            const view = new Uint8Array(ab);
-            for (let i = 0; i < this.length; ++i) {
-                view[i] = this[i];
+// ✅ FIX 2: protoType se llama al inicio del módulo
+export function protoType() {
+    Buffer.prototype.toArrayBuffer = function toArrayBufferV2() {
+        const ab = new ArrayBuffer(this.length);
+        const view = new Uint8Array(ab);
+        for (let i = 0; i < this.length; ++i) view[i] = this[i];
+        return ab;
+    };
+    Buffer.prototype.toArrayBufferV2 = function toArrayBuffer() {
+        return this.buffer.slice(this.byteOffset, this.byteOffset + this.byteLength);
+    };
+    ArrayBuffer.prototype.toBuffer = function toBuffer() {
+        return Buffer.from(new Uint8Array(this));
+    };
+    Uint8Array.prototype.getFileType =
+        ArrayBuffer.prototype.getFileType =
+        Buffer.prototype.getFileType =
+        async function getFileType() {
+            return await fileTypeFromBuffer(this);
+        };
+    String.prototype.isNumber = Number.prototype.isNumber = isNumber;
+    String.prototype.capitalize = function capitalize() {
+        return this.charAt(0).toUpperCase() + this.slice(1, this.length);
+    };
+    String.prototype.capitalizeV2 = function capitalizeV2() {
+        return this.split(" ").map(v => v.capitalize()).join(" ");
+    };
+
+    // ✅ Mejorada: caché global y manejo de errores
+    String.prototype.resolveLidToRealJid = (function() {
+        const lidCache = new Map();
+        return async function(groupChatId, conn, maxRetries = 3, retryDelay = 60000) {
+            const inputJid = this.toString();
+            if (!inputJid.endsWith("@lid") || !groupChatId?.endsWith("@g.us")) {
+                return inputJid.includes("@") ? inputJid : `${inputJid}@s.whatsapp.net`;
             }
-            return ab;
-        };
-        /**
-         * @return {ArrayBuffer}
-         */
-        Buffer.prototype.toArrayBufferV2 = function toArrayBuffer() {
-            return this.buffer.slice(
-                this.byteOffset,
-                this.byteOffset + this.byteLength,
-            );
-        };
-        /**
-         * @return {Buffer}
-         */
-        ArrayBuffer.prototype.toBuffer = function toBuffer() {
-            return Buffer.from(new Uint8Array(this));
-        };
-        // /**
-        //  * @returns {String}
-        //  */
-        // Buffer.prototype.toUtilFormat = ArrayBuffer.prototype.toUtilFormat = Object.prototype.toUtilFormat = Array.prototype.toUtilFormat = function toUtilFormat() {
-        //     return util.format(this)
-        // }
-        Uint8Array.prototype.getFileType =
-            ArrayBuffer.prototype.getFileType =
-            Buffer.prototype.getFileType =
-            async function getFileType() {
-                return await fileTypeFromBuffer(this);
-            };
-        /**
-         * @returns {Boolean}
-         */
-        String.prototype.isNumber = Number.prototype.isNumber = isNumber;
-        /**
-         *
-         * @return {String}
-         */
-        String.prototype.capitalize = function capitalize() {
-            return this.charAt(0).toUpperCase() + this.slice(1, this.length);
-        };
-        /**
-         * @return {String}
-         */
-        String.prototype.capitalizeV2 = function capitalizeV2() {
-            const str = this.split(" ");
-            return str.map((v) => v.capitalize()).join(" ");
-        };
-
-        // Resolver problema LIDs, Fu*k You Meta - Resolve id@lid
-        String.prototype.resolveLidToRealJid = (function() {
-            const lidCache = new Map();
-            return async function(
-                groupChatId,
-                conn,
-                maxRetries = 3,
-                retryDelay = 60000,
-            ) {
-                const inputJid = this.toString();
-                if (!inputJid.endsWith("@lid") || !groupChatId?.endsWith("@g.us")) {
-                    return inputJid.includes("@") ? inputJid : `${inputJid}@s.whatsapp.net`;
-                }
-                if (lidCache.has(inputJid)) {
-                    return lidCache.get(inputJid);
-                }
-                const lidToFind = inputJid.split("@")[0];
-                let attempts = 0;
-                while (attempts < maxRetries) {
-                    try {
-                        const metadata = await conn?.groupMetadata(groupChatId);
-                        if (!metadata?.participants)
-                            throw new Error("No se obtuvieron participantes");
-                        for (const participant of metadata.participants) {
-                            try {
-                                if (!participant?.jid) continue;
-                                const contactDetails = await conn?.onWhatsApp(participant.jid);
-                                if (!contactDetails?.[0]?.lid) continue;
-                                const possibleLid = contactDetails[0].lid.split("@")[0];
-                                if (possibleLid === lidToFind) {
-                                    lidCache.set(inputJid, participant.jid);
-                                    return participant.jid;
-                                }
-                            } catch (e) {
-                                continue;
+            if (lidCache.has(inputJid)) return lidCache.get(inputJid);
+            const lidToFind = inputJid.split("@")[0];
+            let attempts = 0;
+            while (attempts < maxRetries) {
+                try {
+                    const metadata = await conn?.groupMetadata(groupChatId);
+                    if (!metadata?.participants)
+                        throw new Error("No participants");
+                    for (const participant of metadata.participants) {
+                        try {
+                            if (!participant?.jid) continue;
+                            const contactDetails = await conn?.onWhatsApp(participant.jid);
+                            if (!contactDetails?.[0]?.lid) continue;
+                            const possibleLid = contactDetails[0].lid.split("@")[0];
+                            if (possibleLid === lidToFind) {
+                                lidCache.set(inputJid, participant.jid);
+                                if (!conn.lidCache) conn.lidCache = new Map();
+                                conn.lidCache.set(participant.jid, inputJid);
+                                return participant.jid;
                             }
-                        }
+                        } catch { continue; }
+                    }
+                    lidCache.set(inputJid, inputJid);
+                    return inputJid;
+                } catch (e) {
+                    if (++attempts >= maxRetries) {
                         lidCache.set(inputJid, inputJid);
                         return inputJid;
-                    } catch (e) {
-                        if (++attempts >= maxRetries) {
-                            lidCache.set(inputJid, inputJid);
-                            return inputJid;
-                        }
-                        await new Promise((resolve) => setTimeout(resolve, retryDelay));
                     }
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
                 }
-                return inputJid;
-            };
-        })();
-
-        String.prototype.decodeJid = function decodeJid() {
-            if (/:\d+@/gi.test(this)) {
-                const decode = jidDecode(this) || {};
-                return (
-                    (decode.user && decode.server && decode.user + "@" + decode.server) ||
-                    this
-                ).trim();
-            } else return this.trim();
+            }
+            return inputJid;
         };
-        /**
-         * number must be milliseconds
-         * @return {string}
-         */
-        Number.prototype.toTimeString = function toTimeString() {
-            // const milliseconds = this % 1000
-            const seconds = Math.floor((this / 1000) % 60);
-            const minutes = Math.floor((this / (60 * 1000)) % 60);
-            const hours = Math.floor((this / (60 * 60 * 1000)) % 24);
-            const days = Math.floor(this / (24 * 60 * 60 * 1000));
-            return (
-                (days ? `${days} day(s) ` : "") +
-                (hours ? `${hours} hour(s) ` : "") +
-                (minutes ? `${minutes} minute(s) ` : "") +
-                (seconds ? `${seconds} second(s)` : "")
-            ).trim();
-        };
-        Number.prototype.getRandom =
-            String.prototype.getRandom =
-            Array.prototype.getRandom =
-            getRandom;
-    }
+    })();
 
-    function isNumber() {
-        const int = parseInt(this);
-        return typeof int === "number" && !isNaN(int);
-    }
+    String.prototype.decodeJid = function decodeJid() {
+        if (/:\d+@/gi.test(this)) {
+            const decode = jidDecode(this) || {};
+            return (decode.user && decode.server && decode.user + "@" + decode.server) || this.trim();
+        }
+        return this.trim();
+    };
+    Number.prototype.toTimeString = function toTimeString() {
+        const seconds = Math.floor((this / 1000) % 60);
+        const minutes = Math.floor((this / (60 * 1000)) % 60);
+        const hours = Math.floor((this / (60 * 60 * 1000)) % 24);
+        const days = Math.floor(this / (24 * 60 * 60 * 1000));
+        return (
+            (days ? `${days} day(s) ` : "") +
+            (hours ? `${hours} hour(s) ` : "") +
+            (minutes ? `${minutes} minute(s) ` : "") +
+            (seconds ? `${seconds} second(s)` : "")
+        ).trim();
+    };
+    Number.prototype.getRandom =
+        String.prototype.getRandom =
+        Array.prototype.getRandom =
+        getRandom;
+}
 
-    function getRandom() {
-        if (Array.isArray(this) || this instanceof String)
-            return this[Math.floor(Math.random() * this.length)];
-        return Math.floor(Math.random() * this);
-    }
+// ---------- Funciones helper ----------
+function isNumber() {
+    const int = parseInt(this);
+    return typeof int === "number" && !isNaN(int);
+}
 
-    /**
-     * @deprecated use the operator ?? instead
-     * - (null || undefined) ?? 'idk'
-     * @link https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Nullish_coalescing_operator
-     */
-    function nullish(args) {
-        return !(args !== null && args !== undefined);
-    }
+function getRandom() {
+    if (Array.isArray(this) || this instanceof String)
+        return this[Math.floor(Math.random() * this.length)];
+    return Math.floor(Math.random() * this);
+}
+
+function nullish(args) {
+    return !(args !== null && args !== undefined);
+}

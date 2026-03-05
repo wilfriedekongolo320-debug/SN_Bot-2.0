@@ -4,7 +4,7 @@ import {fileURLToPath} from 'url';
 import fs from 'fs'; 
 import moment from 'moment-timezone';
 
-global.botnumber = ""
+global.botnumber = "5217971520357"
 global.confirmCode = ""
 global.authFile = `JinwooseSession`;
 
@@ -15,10 +15,14 @@ global.isBaileysFail = false;
 
 global.defaultLenguaje = 'es';
 
+// [FIX] Se agrega el LID de Meta como owner adicional
+// porque WhatsApp ahora envía m.sender como LID en grupos
 global.owner = [
-  ['5215629885039', '👑 Propietario 👑', true],
-  ['5215629885039']
-];
+  ['5215629885039', '👑 SinNombre 👑', true],
+  ['5215629885039'],
+//  ['51793362997363', '👑 SinNombre LID 👑', true],
+//  ['51793362997363'],
+]
 
 global.suittag = ['5215629885039'];
 global.prems = ['5215629885029'];

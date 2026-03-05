@@ -1,59 +1,44 @@
-import fs from 'fs';
-import { img2img } from '../src/libraries/nanobanana.js';
-
+// En tu archivo de comando: src/plugins/ai_nanobanana.js (o similar)
+import { ... } from '../src/libraries/nanobanana.js'
 const handler = async (m, { conn, text, usedPrefix, command }) => {
-
   const q = m.quoted ? m.quoted : m;
   const mime = (q.msg || q).mimetype || q.mediaType || '';
 
-  if (!/image/g.test(mime)) throw `*Debes responder a una imagen*`;
-  if (!text) throw `*Escribe un prompt/descripción para la edición*`;
+  if (!/image/g.test(mime)) throw `*❌ Debes responder a una imagen*`;
+  if (!text) throw `*❌ Escribe un prompt para editar*\n\nEj: \`${usedPrefix + command} estilo anime\``;
 
   const data = await q.download?.();
-  if (!data) throw `*Error al descargar la imagen*`;
+  if (!data || data.length === 0) throw `*❌ No se pudo descargar la imagen*`;
 
   try {
-    // Animación de reloj real
-    const clockFrames = ['🕐', '🕑', '🕒', '🕓', '🕔', '🕕', '🕖', '🕗', '🕘', '🕙', '🕚', '🕛'];
-    let frameIndex = 0;
+    await conn.sendPresenceUpdate('composing', m.chat);
+    console.log(`🎨 Procesando: "${text}"`);
     
-    const progressMsg = await conn.sendMessage(m.chat, {
-      text: `${clockFrames[frameIndex]} Procesando imagen...`
-    }, { quoted: m });
-
-    // Actualizar el reloj cada segundo
-    const progressInterval = setInterval(async () => {
-      frameIndex = (frameIndex + 1) % clockFrames.length;
-      try {
-        await conn.sendMessage(m.chat, {
-          text: `${clockFrames[frameIndex]} Procesando imagen...`,
-          edit: progressMsg.key
-        });
-      } catch (e) {
-        // Si falla la edición, no hacer nada
-      }
-    }, 1000);
-
-    const resultBuffer = await img2img(data, text);
-
-    // Limpiar intervalo y eliminar mensaje de progreso
-    clearInterval(progressInterval);
-    await conn.sendMessage(m.chat, { delete: progressMsg.key }).catch(() => null);
-
-    console.log(resultBuffer);
+    // ✅ Llamada compatible
+    const resultBuffer = await img2img(data, text, {
+      pollTimeout: 3 * 60 * 1000, // 3 minutos
+      styleId: "realistic"
+    });
 
     await conn.sendMessage(m.chat, { 
       image: resultBuffer, 
-      caption: 'Aquí tienes tu imagen 🖼️' 
+      caption: `✅ *Listo*\n📝 ${text}\n🖼️ NanoBanana`
     }, { quoted: m });
 
   } catch (error) {
-    console.error(error);
-    throw `*Error al procesar la imagen con NanoBanana*`;
+    console.error('❌ Error nanobanana:', error.message);
+    
+    if (error.message.includes('nanobanana.ai') || error.message.includes('EAI_AGAIN')) {
+      throw `*🌐 El servicio NanoBanana no está disponible.*\nIntenta más tarde o contacta al admin.`;
+    } else if (error.message.includes('Rate limit')) {
+      throw `*🚫 Límite de solicitudes.*\nEspera ~1 minuto.`;
+    } else {
+      throw `*❌ Error: ${error.message}*`;
+    }
   }
 };
 
 handler.help = ['nanobanana <prompt>'];
-handler.tags = ['ai', 'converter'];
-handler.command = ['nanobanana'];
+handler.tags = ['ai'];
+handler.command = ['nanobanana', 'nanoedit'];
 export default handler;
